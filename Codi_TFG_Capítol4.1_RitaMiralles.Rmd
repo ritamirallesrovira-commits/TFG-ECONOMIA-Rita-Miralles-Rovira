@@ -1,0 +1,355 @@
+---
+title: "Punt 4.1"
+author: "Rita Miralles Rovira"
+date: "2026-03-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Aquest primer R Markdown del punt 4, permet llegir les dades trimestrals i agruparles de manera anual.
+
+#2025
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2025")
+
+load("EPA_2025T1.RData")
+df12025 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+load("EPA_2025T2.RData")
+df22025 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+load("EPA_2025T3.RData")
+df32025 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+load("EPA_2025T4.RData")
+df42025 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+df_2025 <- rbind(df12025, df22025, df32025, df42025)
+save(df_2025, file = "EPA_2025.RData")
+```
+
+#2024
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2024")
+
+load("EPA_2024T1.RData")
+df12024 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+load("EPA_2024T2.RData")
+df22024 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+load("EPA_2024T3.RData")
+df32024 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+load("EPA_2024T4.RData")
+df42024 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+df_2024 <- rbind(df12024, df22024, df32024, df42024)
+save(df_2024, file = "EPA_2024.RData")
+```
+
+#2023
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2023")
+
+load("EPA_2023T1.RData")
+df12023 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+names(df12023)[names(df12023) == "HORPLU"] <- "HOREPLU"
+rm(Metadatos)
+rm(Microdatos)
+
+load("EPA_2023T2.RData")
+df22023 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+load("EPA_2023T3.RData")
+df32023 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+load("EPA_2023T4.RData")
+df42023 <- get(ls()[2])  # agafa l'objecte 2 (df_micro)
+rm(df_meta)
+rm(df_micro)
+
+df_2023 <- rbind(df12023, df22023, df32023, df42023)
+save(df_2023, file = "EPA_2023.RData")
+
+```
+
+#2022
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2022")
+
+df12022 <- read.table("EPA_2022T1.csv", sep = "\t", header = TRUE)
+df22022 <- read.table("EPA_2022T2.csv", sep = "\t", header = TRUE)
+df32022 <- read.table("EPA_2022T3.csv", sep = "\t", header = TRUE)
+df42022 <- read.table("EPA_2022T4.csv", sep = "\t", header = TRUE)
+
+df_2022 <- rbind(df12022, df22022, df32022, df42022)
+save(df_2022, file = "EPA_2022.RData")
+```
+
+#2021
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2021")
+
+df12021 <- read.table("EPA_2021T1.csv", sep = "\t", header = TRUE)
+df22021 <- read.table("EPA_2021T2.csv", sep = "\t", header = TRUE)
+df32021 <- read.table("EPA_2021T3.csv", sep = "\t", header = TRUE)
+df42021 <- read.table("EPA_2021T4.csv", sep = "\t", header = TRUE)
+
+df_2021 <- rbind(df12021, df22021, df32021, df42021)
+save(df_2021, file = "EPA_2021.RData")
+```
+
+#2020
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2020")
+
+df12020 <- read.table("EPA_2020T1.csv", sep = "\t", header = TRUE)
+df22020 <- read.table("EPA_2020T2.csv", sep = "\t", header = TRUE)
+df32020 <- read.table("EPA_2020T3.csv", sep = "\t", header = TRUE)
+df42020 <- read.table("EPA_2020T4.csv", sep = "\t", header = TRUE)
+
+df_2020 <- rbind(df12020, df22020, df32020, df42020)
+save(df_2020, file = "EPA_2020.RData")
+```
+
+#2019
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2019")
+
+df12019 <- read.table("EPA_2019T1.csv", sep = "\t", header = TRUE)
+df22019 <- read.table("EPA_2019T2.csv", sep = "\t", header = TRUE)
+df32019 <- read.table("EPA_2019T3.csv", sep = "\t", header = TRUE)
+df42019 <- read.table("EPA_2019T4.csv", sep = "\t", header = TRUE)
+
+df_2019 <- rbind(df12019, df22019, df32019, df42019)
+save(df_2019, file = "EPA_2019.RData")
+```
+
+#2018
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2018")
+
+df12018 <- read.table("EPA_2018T1.csv", sep = "\t", header = TRUE)
+df22018 <- read.table("EPA_2018T2.csv", sep = "\t", header = TRUE)
+df32018 <- read.table("EPA_2018T3.csv", sep = "\t", header = TRUE)
+df42018 <- read.table("EPA_2018T4.csv", sep = "\t", header = TRUE)
+
+df_2018 <- rbind(df12018, df22018, df32018, df42018)
+save(df_2018, file = "EPA_2018.RData")
+```
+
+#2017
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2017")
+
+df12017 <- read.table("EPA_2017T1.csv", sep = "\t", header = TRUE)
+df22017 <- read.table("EPA_2017T2.csv", sep = "\t", header = TRUE)
+df32017 <- read.table("EPA_2017T3.csv", sep = "\t", header = TRUE)
+df42017 <- read.table("EPA_2017T4.csv", sep = "\t", header = TRUE)
+
+df_2017 <- rbind(df12017, df22017, df32017, df42017)
+save(df_2017, file = "EPA_2017.RData")
+```
+
+#2016
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2016")
+
+df12016 <- read.table("EPA_2016T1.csv", sep = "\t", header = TRUE)
+df22016 <- read.table("EPA_2016T2.csv", sep = "\t", header = TRUE)
+df32016 <- read.table("EPA_2016T3.csv", sep = "\t", header = TRUE)
+df42016 <- read.table("EPA_2016T4.csv", sep = "\t", header = TRUE)
+
+df_2016 <- rbind(df12016, df22016, df32016, df42016)
+save(df_2016, file = "EPA_2016.RData")
+```
+
+#2015
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2015")
+
+df12015 <- read.table("EPA_2015T1.csv", sep = "\t", header = TRUE)
+df22015 <- read.table("EPA_2015T2.csv", sep = "\t", header = TRUE)
+df32015 <- read.table("EPA_2015T3.csv", sep = "\t", header = TRUE)
+df42015 <- read.table("EPA_2015T4.csv", sep = "\t", header = TRUE)
+
+df_2015 <- rbind(df12015, df22015, df32015, df42015)
+save(df_2015, file = "EPA_2015.RData")
+```
+
+#2014
+```{R}
+#llegim els 4 trimestres
+setwd("~/Desktop/2014")
+
+df12014 <- read.table("EPA_2014T1.csv", sep = "\t", header = TRUE)
+df22014 <- read.table("EPA_2014T2.csv", sep = "\t", header = TRUE)
+df32014 <- read.table("EPA_2014T3.csv", sep = "\t", header = TRUE)
+df42014 <- read.table("EPA_2014T4.csv", sep = "\t", header = TRUE)
+
+df_2014 <- rbind(df12014, df22014, df32014, df42014)
+save(df_2014, file = "EPA_2014.RData")
+```
+
+#2013
+```{r}
+#llegim els 4 trimestres
+setwd("~/Desktop/2013")
+
+df12013 <- read.table("EPA_2013T1.csv", sep = "\t", header = TRUE)
+df22013 <- read.table("EPA_2013T2.csv", sep = "\t", header = TRUE)
+df32013 <- read.table("EPA_2013T3.csv", sep = "\t", header = TRUE)
+df42013 <- read.table("EPA_2013T4.csv", sep = "\t", header = TRUE)
+
+df_2013 <- rbind(df12013, df22013, df32013, df42013)
+save(df_2013, file = "EPA_2013.RData")
+```
+
+#2012
+````{r}
+#llegim els 4 trimestres
+setwd("~/Desktop/2012")
+
+df12012 <- read.table("EPA_2012T1.csv", sep = "\t", header = TRUE)
+df22012 <- read.table("EPA_2012T2.csv", sep = "\t", header = TRUE)
+df32012 <- read.table("EPA_2012T3.csv", sep = "\t", header = TRUE)
+df42012 <- read.table("EPA_2012T4.csv", sep = "\t", header = TRUE)
+
+df_2012 <- rbind(df12012, df22012, df32012, df42012)
+save(df_2012, file = "EPA_2012.RData")
+````
+
+#2011
+```{r}
+#llegim els 4 trimestres
+setwd("~/Desktop/2011")
+
+df12011 <- read.table("EPA_2011T1.csv", sep = "\t", header = TRUE)
+df22011 <- read.table("EPA_2011T2.csv", sep = "\t", header = TRUE)
+df32011 <- read.table("EPA_2011T3.csv", sep = "\t", header = TRUE)
+df42011 <- read.table("EPA_2011T4.csv", sep = "\t", header = TRUE)
+
+df_2011 <- rbind(df12011, df22011, df32011, df42011)
+save(df_2011, file = "EPA_2011.RData")
+
+```
+#2010
+```{r}
+#llegim els 4 trimestres
+setwd("~/Desktop/2010")
+
+df12010 <- read.table("EPA_2010T1.csv", sep = "\t", header = TRUE)
+df22010 <- read.table("EPA_2010T2.csv", sep = "\t", header = TRUE)
+df32010 <- read.table("EPA_2010T3.csv", sep = "\t", header = TRUE)
+df42010 <- read.table("EPA_2010T4.csv", sep = "\t", header = TRUE)
+
+df_2010 <- rbind(df12010, df22010, df32010, df42010)
+save(df_2010, file = "EPA_2010.RData")
+```
+
+````{r}
+#2009
+#llegim els 4 trimestres
+setwd("~/Desktop/2009")
+
+df12009 <- read.table("EPA_2009T1.csv", sep = "\t", header = TRUE)
+df22009 <- read.table("EPA_2009T2.csv", sep = "\t", header = TRUE)
+df32009 <- read.table("EPA_2009T3.csv", sep = "\t", header = TRUE)
+df42009 <- read.table("EPA_2009T4.csv", sep = "\t", header = TRUE)
+
+df_2009 <- rbind(df12009, df22009, df32009, df42009)
+save(df_2009, file = "EPA_2009.RData")
+````
+
+#2008
+```{r}
+#llegim els 4 trimestres
+setwd("~/Desktop/2008")
+
+df12008 <- read.table("EPA_2008T1.csv", sep = "\t", header = TRUE)
+df22008 <- read.table("EPA_2008T2.csv", sep = "\t", header = TRUE)
+df32008 <- read.table("EPA_2008T3.csv", sep = "\t", header = TRUE)
+df42008 <- read.table("EPA_2008T4.csv", sep = "\t", header = TRUE)
+
+df_2008 <- rbind(df12008, df22008, df32008, df42008)
+save(df_2008, file = "EPA_2008.RData")
+```
+
+#2007
+```{r}
+
+#llegim els 4 trimestres
+setwd("~/Desktop/2007")
+
+df12007 <- read.table("EPA_2007T1.csv", sep = "\t", header = TRUE)
+df22007 <- read.table("EPA_2007T2.csv", sep = "\t", header = TRUE)
+df32007 <- read.table("EPA_2007T3.csv", sep = "\t", header = TRUE)
+df42007 <- read.table("EPA_2007T4.csv", sep = "\t", header = TRUE)
+
+df_2007 <- rbind(df12007, df22007, df32007, df42007)
+save(df_2007, file = "EPA_2007.RData")
+```
+
+#2006
+```{r}
+#llegim els 4 trimestres
+setwd("~/Desktop/2006")
+
+df12006 <- read.table("EPA_2006T1.csv", sep = "\t", header = TRUE)
+df22006 <- read.table("EPA_2006T2.csv", sep = "\t", header = TRUE)
+df32006 <- read.table("EPA_2006T3.csv", sep = "\t", header = TRUE)
+df42006 <- read.table("EPA_2006T4.csv", sep = "\t", header = TRUE)
+
+df_2006 <- rbind(df12006, df22006, df32006, df42006)
+save(df_2006, file = "EPA_2006.RData")
+```
+#2005
+```{r}
+#llegim els 4 trimestres
+setwd("~/Desktop/2005")
+
+df12005 <- read.table("EPA_2005T1.csv", sep = "\t", header = TRUE)
+df22005 <- read.table("EPA_2005T2.csv", sep = "\t", header = TRUE)
+df32005 <- read.table("EPA_2005T3.csv", sep = "\t", header = TRUE)
+df42005 <- read.table("EPA_2005T4.csv", sep = "\t", header = TRUE)
+
+df_2005 <- rbind(df12005, df22005, df32005, df42005)
+save(df_2005, file = "EPA_2005.RData")
+```
+
+
+

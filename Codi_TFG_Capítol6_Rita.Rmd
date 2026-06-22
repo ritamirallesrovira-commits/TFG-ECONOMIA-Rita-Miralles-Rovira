@@ -1,0 +1,440 @@
+---
+title: "Punt 6"
+author: "Rita Miralles Rovira"
+date: "2026-05-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#Si cal carregar les dades:
+```{r}
+load("EPA_2005_2025v2.RData") 
+```
+
+#El següent R Markdown conté el codi amb el que s'han reproduit els gràfics de l'apartat 6 del TFG del grau d'Economia de Rita Miralles Rovira.
+#L'objectiu és que es pugui replicar o reproduir si es desitja.
+
+#6.1: Evolució del nivell educatiu de la població ocupada a Espanya (2005-2025)
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# 1) Si la bbdd no existeix ANY, es crea a partir de CICLO
+
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# 2) Etiquetes del nivell educatiu 
+
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+ordre_files <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+#colors triats manualment segons gust
+colors_nforma <- c(
+  "gray90",
+  "gray78",
+  "khaki2",
+  "orange2",
+  "olivedrab2",
+  "lightblue2",
+  "cornflowerblue"
+)
+
+# 3) BASE: considerant només ocupats!!
+
+df <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  trimws(as.character(AOI)) != "" &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(FACTOREL),
+  .(
+    ANY,
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+df[, NFORMA_CAT := etiqueta_nforma(NFORMA)]
+
+# 4) Resum ponderat x any i nivell educatiu. 
+resum_any <- df[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, NFORMA_CAT)
+]
+
+resum_any[, pct := 100 * valor / sum(valor), by = ANY]
+
+base_anys <- CJ(
+  ANY = 2005:2025,
+  NFORMA_CAT = ordre_files
+)
+
+resum_any <- merge(base_anys, resum_any, by = c("ANY", "NFORMA_CAT"), all.x = TRUE)
+resum_any[is.na(pct), pct := 0]
+
+# 5) TAULA x gràfic 
+
+taula_any <- dcast(
+  resum_any,
+  NFORMA_CAT ~ ANY,
+  value.var = "pct",
+  fill = 0
+)
+
+taula_base <- data.table(NFORMA_CAT = ordre_files)
+taula_any <- merge(taula_base, taula_any, by = "NFORMA_CAT", all.x = TRUE, sort = FALSE)
+taula_any[is.na(taula_any)] <- 0
+
+mat_any <- as.matrix(taula_any[, -1])
+
+
+# 6) Gràfic
+jpeg("grafic_context_evolucio_nivell_educatiu_2005_2025.jpg", width = 3800, height = 1800, res = 220)
+
+layout(matrix(c(1, 2), nrow = 1), widths = c(9, 1.6))
+
+# panell principal
+par(mar = c(8, 6, 5, 2))
+
+bp <- barplot(
+  mat_any,
+  beside = FALSE,
+  col = colors_nforma,
+  border = NA,
+  ylim = c(0, 100),
+  xaxt = "n",
+  yaxt = "n",
+  ylab = "Percentatge",
+  main = "Evolució del nivell educatiu de la població ocupada a Espanya (2005-2025)"
+)
+
+axis(1, at = bp, labels = colnames(mat_any), las = 2, cex.axis = 0.85)
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+
+xleft  <- min(bp) - 0.45
+xright <- max(bp) + 0.45
+for (y in seq(0, 100, by = 10)) {
+  segments(x0 = xleft, y0 = y, x1 = xright, y1 = y, col = "gray88")
+}
+
+for (j in 1:ncol(mat_any)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_any)) {
+    valor <- mat_any[i, j]
+    if (valor >= 4) {
+      text(
+        x = bp[j],
+        y = acumulat + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.62
+      )
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# panell llegenda
+par(mar = c(8, 0, 5, 0))
+plot.new()
+legend(
+  "center",
+  legend = rev(ordre_files),
+  fill = rev(colors_nforma),
+  bty = "o",
+  bg = "white",
+  cex = 0.95,
+  title = "Nivell educatiu"
+)
+
+dev.off()
+```
+
+#6.2: Distribució del nivell educatiu per grup ocupacional a Espanya: comparació entre 2005 i 2025
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# 1) Si la bbdd no existeix ANY, es crea a partir de CICLO
+
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# 2) Etiquetes del nivell educatiu 
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+# 3) Ordre fixe 
+
+ordre_files <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+ordre_cols <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció qualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals de suport",
+  "Professionals científics i intel·lectuals",
+  "Directius i gerents"
+)
+
+ordre_cols_labels <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció\nqualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals\nde suport",
+  "Professionals científics\ni intel·lectuals",
+  "Directius i gerents"
+)
+
+#colors escollits personalment
+colors_nivell <- c(
+  "gray90",
+  "gray78",
+  "khaki2",
+  "orange2",
+  "olivedrab2",
+  "lightblue2",
+  "cornflowerblue"
+)
+
+# 4) Funció per crear taula d'any 
+crear_taula_any <- function(data, any_sel) {
+  
+  df <- data[
+    ANY == any_sel &
+    !is.na(AOI) &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &
+    !is.na(FACTOREL),
+    .(
+      NFORMA = trimws(as.character(NFORMA)),
+      OCUP1  = trimws(as.character(OCUP1)),
+      FACTOREL
+    )
+  ]
+  
+  df[, NFORMA_CAT := etiqueta_nforma(NFORMA)]
+  df[, OCUP_CAT := etiqueta_ocup(OCUP1)]
+  
+  resum <- df[
+    ,
+    .(valor = sum(FACTOREL, na.rm = TRUE)),
+    by = .(NFORMA_CAT, OCUP_CAT)
+  ]
+  
+  totals <- resum[, .(total = sum(valor)), by = OCUP_CAT]
+  resum <- merge(resum, totals, by = "OCUP_CAT")
+  resum[, pct := 100 * valor / total]
+  
+  taula <- dcast(
+    resum,
+    NFORMA_CAT ~ OCUP_CAT,
+    value.var = "pct",
+    fill = 0
+  )
+  
+  taula_base <- data.table(NFORMA_CAT = ordre_files)
+  taula <- merge(taula_base, taula, by = "NFORMA_CAT", all.x = TRUE, sort = FALSE)
+  taula[is.na(taula)] <- 0
+  
+  for (col in ordre_cols) {
+    if (!col %in% names(taula)) taula[, (col) := 0]
+  }
+  
+  taula <- taula[, c("NFORMA_CAT", ordre_cols), with = FALSE]
+  
+  cols_num <- setdiff(names(taula), "NFORMA_CAT")
+  taula[, (cols_num) := lapply(.SD, function(x) round(x, 2)), .SDcols = cols_num]
+  
+  return(taula)
+}
+
+# 5)Taules 2005 i 2025 
+taula_2005 <- crear_taula_any(EPA_2005_2025v2, 2005)
+taula_2025 <- crear_taula_any(EPA_2005_2025v2, 2025)
+
+mat_2005 <- as.matrix(taula_2005[, -1])
+rownames(mat_2005) <- taula_2005$NFORMA_CAT
+
+mat_2025 <- as.matrix(taula_2025[, -1])
+rownames(mat_2025) <- taula_2025$NFORMA_CAT
+
+# Gràfic
+jpeg("grafic_context_2005_vs_2025_nivell_educatiu_ocupacio.jpg", width = 3600, height = 1700, res = 220)
+
+layout(matrix(c(1, 2, 3), nrow = 1), widths = c(5, 5, 2.8))
+par(oma = c(0, 0, 4, 0))
+
+# gràfic 2005
+par(mar = c(10, 6, 5, 2), xpd = FALSE)
+
+bp1 <- barplot(
+  mat_2005,
+  beside = FALSE,
+  col = colors_nivell,
+  border = "white",
+  ylim = c(0, 100),
+  yaxt = "n",
+  xaxt = "n",
+  ylab = "Percentatge",
+  main = "Any 2005"
+)
+
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+axis(1, at = bp1, labels = ordre_cols_labels, las = 2, cex.axis = 0.82)
+abline(h = seq(0, 100, by = 10), col = "gray90", lty = 1)
+
+for (j in 1:ncol(mat_2005)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_2005)) {
+    valor <- mat_2005[i, j]
+    if (valor >= 6) {
+      y_pos <- acumulat + valor / 2
+      text(bp1[j], y_pos, labels = paste0(round(valor, 1), "%"), cex = 0.68)
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# gràfic 2025
+par(mar = c(10, 6, 5, 2), xpd = FALSE)
+
+bp2 <- barplot(
+  mat_2025,
+  beside = FALSE,
+  col = colors_nivell,
+  border = "white",
+  ylim = c(0, 100),
+  yaxt = "n",
+  xaxt = "n",
+  ylab = "Percentatge",
+  main = "Any 2025"
+)
+
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+axis(1, at = bp2, labels = ordre_cols_labels, las = 2, cex.axis = 0.82)
+abline(h = seq(0, 100, by = 10), col = "gray90", lty = 1)
+
+for (j in 1:ncol(mat_2025)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_2025)) {
+    valor <- mat_2025[i, j]
+    if (valor >= 6) {
+      y_pos <- acumulat + valor / 2
+      text(bp2[j], y_pos, labels = paste0(round(valor, 1), "%"), cex = 0.68)
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# llegenda
+par(mar = c(10, 1, 5, 1), xpd = TRUE)
+plot.new()
+
+legend(
+  "center",
+  legend = rev(rownames(mat_2005)),
+  fill = rev(colors_nivell),
+  bty = "o",
+  bg = "white",
+  cex = 0.9,
+  title = "Nivell educatiu"
+)
+
+mtext(
+  "Distribució del nivell educatiu per grup ocupacional a Espanya: comparació entre 2005 i 2025",
+  side = 3,
+  outer = TRUE,
+  line = 1,
+  cex = 1.2
+)
+
+dev.off()
+```
+
+
+

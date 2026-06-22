@@ -1,0 +1,5657 @@
+---
+title: "Punt 6"
+author: "Rita Miralles Rovira"
+date: "2026-05-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#El present document R Markdown recull el conjunt de codi elaborat per dur a terme l'anàlisi descriptiva del Treball de Final de Grau amb la finalitat de facilitar-ne la traçabilitat i reproducció. 
+
+#Si cal carregar les dades:
+```{r}
+load("EPA_2005_2025v2.RData") 
+```
+
+
+
+
+
+#Gràfic 6.1 - Distribució del nivell educatiu dels ocupats
+```{r}
+library(data.table)
+setDT(EPA_2005_2025v2)
+
+# 1) Si no s'ha definit la variable ANY, es crea a partir de CICLO 
+
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# 2) Definició d'etiquetes del nivell educatiu
+
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+ordre_files <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+# colors del gràfic (posats manualment segons preferències)
+colors_nforma <- c(
+  "orangered2",
+  "orange2",
+  "olivedrab2",
+  "khaki2",
+  "lightsteelblue2",
+  "skyblue4",
+  "snow3"
+)
+
+# 3) Base del gràfic (només ocupats!)
+
+df <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  trimws(as.character(AOI)) != "" &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(FACTOREL),
+  .(
+    ANY,
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+df[, NFORMA_CAT := etiqueta_nforma(NFORMA)]
+
+
+# 4) Resum ponderat x any i nivell educatiu 
+resum_any <- df[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, NFORMA_CAT)
+]
+
+resum_any[, pct := 100 * valor / sum(valor), by = ANY]
+
+base_anys <- CJ(
+  ANY = 2005:2025,
+  NFORMA_CAT = ordre_files
+)
+
+resum_any <- merge(base_anys, resum_any, by = c("ANY", "NFORMA_CAT"), all.x = TRUE)
+resum_any[is.na(pct), pct := 0]
+
+# 5) Confecció de taula ampla per al gràfic 
+taula_any <- dcast(
+  resum_any,
+  NFORMA_CAT ~ ANY,
+  value.var = "pct",
+  fill = 0
+)
+
+taula_base <- data.table(NFORMA_CAT = ordre_files)
+taula_any <- merge(taula_base, taula_any, by = "NFORMA_CAT", all.x = TRUE, sort = FALSE)
+taula_any[is.na(taula_any)] <- 0
+
+mat_any <- as.matrix(taula_any[, -1])
+
+# 6) Gràfic de barres apilades 
+#es guarda al directori de treball
+jpeg("grafic_611_barres_apilades_2005_2025.jpg", width = 3800, height = 1800, res = 220)
+
+layout(matrix(c(1, 2), nrow = 1), widths = c(9.3 , 2.4))
+
+#panell principal 
+par(mar = c(8, 6, 5, 2))
+
+bp <- barplot(
+  mat_any,
+  beside = FALSE,
+  col = colors_nforma,
+  border = NA,
+  ylim = c(0, 100),
+  xaxt = "n",
+  yaxt = "n",
+  xlab = "Any",
+  ylab = "Percentatge",
+  main = "Distribució del nivell educatiu dels ocupats a Espanya (2005-2025)"
+)
+
+axis(1, at = bp, labels = colnames(mat_any), las = 2, cex.axis = 0.85)
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+
+# línies guia NOMÉS dins de la zona de les barres
+xleft  <- min(bp) - 0.45
+xright <- max(bp) + 0.45
+for (y in seq(0, 100, by = 10)) {
+  segments(x0 = xleft, y0 = y, x1 = xright, y1 = y, col = "gray88")
+}
+
+# percentatges dins de cada segment
+for (j in 1:ncol(mat_any)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_any)) {
+    valor <- mat_any[i, j]
+    if (valor >= 4) {
+      text(
+        x = bp[j],
+        y = acumulat + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.62
+      )
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# panell llegenda
+par(mar = c(8, 1, 5, 1))
+plot.new()
+legend(
+  "center",
+  legend = rev(ordre_files),
+  fill = rev(colors_nforma),
+  bty = "o",
+  bg = "white",
+  cex = 0.95,
+  title = "Nivell educatiu"
+)
+
+dev.off()
+```
+
+#6.2 
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ETIQUETES
+# --------------------------------------------------
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+ordre_files <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+ordre_cols <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció qualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals de suport",
+  "Professionals científics i intel·lectuals",
+  "Directius i gerents"
+)
+
+# colors 
+colors_nforma <- c(
+  "orangered2",
+  "orange2",
+  "olivedrab2",
+  "khaki2",
+  "lightsteelblue2",
+  "skyblue4",
+  "snow3"
+)
+
+# --------------------------------------------------
+# 3) BASE: NOMÉS OCUPATS, 2005-2025
+# --------------------------------------------------
+df <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  trimws(as.character(AOI)) != "" &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(FACTOREL),
+  .(
+    NFORMA = trimws(as.character(NFORMA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    FACTOREL
+  )
+]
+
+df[, NFORMA_CAT := etiqueta_nforma(NFORMA)]
+df[, OCUP_CAT := etiqueta_ocup(OCUP1)]
+
+# --------------------------------------------------
+# 4) RESUM PONDERAT PER OCUPACIÓ I NIVELL EDUCATIU
+# --------------------------------------------------
+resum_ocup <- df[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(NFORMA_CAT, OCUP_CAT)
+]
+
+# percentatge dins de cada ocupació
+resum_ocup[, pct := 100 * valor / sum(valor), by = OCUP_CAT]
+
+# assegurar totes les combinacions ocupació-nivell educatiu
+base_ocup <- CJ(
+  NFORMA_CAT = ordre_files,
+  OCUP_CAT = ordre_cols
+)
+
+resum_ocup <- merge(base_ocup, resum_ocup, by = c("NFORMA_CAT", "OCUP_CAT"), all.x = TRUE)
+resum_ocup[is.na(pct), pct := 0]
+
+# --------------------------------------------------
+# 5) TAULA AMPLA PER AL GRÀFIC
+# --------------------------------------------------
+taula_ocup <- dcast(
+  resum_ocup,
+  NFORMA_CAT ~ OCUP_CAT,
+  value.var = "pct",
+  fill = 0
+)
+
+taula_base <- data.table(NFORMA_CAT = ordre_files)
+taula_ocup <- merge(taula_base, taula_ocup, by = "NFORMA_CAT", all.x = TRUE, sort = FALSE)
+taula_ocup[is.na(taula_ocup)] <- 0
+
+mat_ocup <- as.matrix(taula_ocup[, -1])
+
+# --------------------------------------------------
+# 6) GRÀFIC DE BARRES APILADES 100%
+# --------------------------------------------------
+jpeg("grafic_62_distribucio_educativa_per_ocupacio.jpg", width = 4200, height = 1900, res = 220)
+
+layout(matrix(c(1, 2), nrow = 1), widths = c(9, 1.6))
+
+# --- panell principal ---
+par(mar = c(14, 6, 5, 2))
+
+bp <- barplot(
+  mat_ocup,
+  beside = FALSE,
+  col = colors_nforma,
+  border = NA,
+  ylim = c(0, 100),
+  xaxt = "n",
+  yaxt = "n",
+  ylab = "Percentatge",
+  main = "Distribució del nivell educatiu per grup ocupacional a Espanya (2005-2025)"
+)
+
+axis(1, at = bp, labels = colnames(mat_ocup), las = 2, cex.axis = 0.88)
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+
+# línies guia només dins la zona de les barres
+xleft  <- min(bp) - 0.45
+xright <- max(bp) + 0.45
+for (y in seq(0, 100, by = 10)) {
+  segments(x0 = xleft, y0 = y, x1 = xright, y1 = y, col = "gray88")
+}
+
+# percentatges dins de cada segment
+for (j in 1:ncol(mat_ocup)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_ocup)) {
+    valor <- mat_ocup[i, j]
+    if (valor >= 4) {
+      text(
+        x = bp[j],
+        y = acumulat + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.68
+      )
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# --- panell llegenda ---
+par(mar = c(14, 0, 5, 0))
+plot.new()
+legend(
+  "center",
+  legend = rev(ordre_files),
+  fill = rev(colors_nforma),
+  bty = "o",
+  bg = "white",
+  cex = 0.95,
+  title = "Nivell educatiu"
+)
+
+dev.off()
+```
+
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) FUNCIONS D'ETIQUETES
+# --------------------------------------------------
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+# --------------------------------------------------
+# 3) ORDRES FIXOS
+# --------------------------------------------------
+ordre_files <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+ordre_cols <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció qualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals de suport",
+  "Professionals científics i intel·lectuals",
+  "Directius i gerents"
+)
+
+# etiquetes per a l'eix X en dues línies on cal
+ordre_cols_labels <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció\nqualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals\nde suport",
+  "Professionals científics\ni intel·lectuals",
+  "Directius i gerents"
+)
+
+# colors del nivell educatiu (de menor a major)
+colors_nivell <- c(
+  "orangered2",
+  "orange2",
+  "olivedrab2",
+  "khaki2",
+  "lightsteelblue2",
+  "skyblue4",
+  "snow3"
+)
+
+# --------------------------------------------------
+# 4) FUNCIÓ PER CREAR TAULA D'UN ANY
+# --------------------------------------------------
+crear_taula_any <- function(data, any_sel) {
+  
+  df <- data[
+    ANY == any_sel &
+    !is.na(AOI) &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &
+    !is.na(FACTOREL),
+    .(
+      NFORMA = trimws(as.character(NFORMA)),
+      OCUP1  = trimws(as.character(OCUP1)),
+      FACTOREL
+    )
+  ]
+  
+  df[, NFORMA_CAT := etiqueta_nforma(NFORMA)]
+  df[, OCUP_CAT := etiqueta_ocup(OCUP1)]
+  
+  resum <- df[
+    ,
+    .(valor = sum(FACTOREL, na.rm = TRUE)),
+    by = .(NFORMA_CAT, OCUP_CAT)
+  ]
+  
+  totals <- resum[, .(total = sum(valor)), by = OCUP_CAT]
+  resum <- merge(resum, totals, by = "OCUP_CAT")
+  resum[, pct := 100 * valor / total]
+  
+  taula <- dcast(
+    resum,
+    NFORMA_CAT ~ OCUP_CAT,
+    value.var = "pct",
+    fill = 0
+  )
+  
+  taula_base <- data.table(NFORMA_CAT = ordre_files)
+  taula <- merge(taula_base, taula, by = "NFORMA_CAT", all.x = TRUE, sort = FALSE)
+  taula[is.na(taula)] <- 0
+  
+  for (col in ordre_cols) {
+    if (!col %in% names(taula)) taula[, (col) := 0]
+  }
+  
+  taula <- taula[, c("NFORMA_CAT", ordre_cols), with = FALSE]
+  
+  cols_num <- setdiff(names(taula), "NFORMA_CAT")
+  taula[, (cols_num) := lapply(.SD, function(x) round(x, 2)), .SDcols = cols_num]
+  
+  return(taula)
+}
+
+# --------------------------------------------------
+# 5) CREAR TAULES 2005 I 2025
+# --------------------------------------------------
+taula_2005 <- crear_taula_any(EPA_2005_2025v2, 2005)
+taula_2025 <- crear_taula_any(EPA_2005_2025v2, 2025)
+
+mat_2005 <- as.matrix(taula_2005[, -1])
+rownames(mat_2005) <- taula_2005$NFORMA_CAT
+
+mat_2025 <- as.matrix(taula_2025[, -1])
+rownames(mat_2025) <- taula_2025$NFORMA_CAT
+
+# --------------------------------------------------
+# 6) GRÀFIC
+# --------------------------------------------------
+jpeg("grafic_2005_2025_nivell_educatiu_ocupacio.jpg", width = 3600, height = 1700, res = 220)
+
+layout(matrix(c(1, 2, 3), nrow = 1), widths = c(5, 5, 2.8))
+par(oma = c(0, 0, 4, 0))   # marge exterior superior perquè el títol hi càpiga
+
+# ---------- gràfic 2005 ----------
+par(mar = c(10, 6, 5, 2), xpd = FALSE)
+
+bp1 <- barplot(
+  mat_2005,
+  beside = FALSE,
+  col = colors_nivell,
+  border = "white",
+  ylim = c(0, 100),
+  yaxt = "n",
+  xaxt = "n",
+  ylab = "Percentatge",
+  main = "Any 2005"
+)
+
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+axis(1, at = bp1, labels = ordre_cols_labels, las = 2, cex.axis = 0.82)
+
+abline(h = seq(0, 100, by = 10), col = "gray90", lty = 1)
+
+for (j in 1:ncol(mat_2005)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_2005)) {
+    valor <- mat_2005[i, j]
+    if (valor >= 6) {
+      y_pos <- acumulat + valor / 2
+      text(bp1[j], y_pos, labels = paste0(round(valor, 1), "%"), cex = 0.68)
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# ---------- gràfic 2025 ----------
+par(mar = c(10, 6, 5, 2), xpd = FALSE)
+
+bp2 <- barplot(
+  mat_2025,
+  beside = FALSE,
+  col = colors_nivell,
+  border = "white",
+  ylim = c(0, 100),
+  yaxt = "n",
+  xaxt = "n",
+  ylab = "Percentatge",
+  main = "Any 2025"
+)
+
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+axis(1, at = bp2, labels = ordre_cols_labels, las = 2, cex.axis = 0.82)
+
+abline(h = seq(0, 100, by = 10), col = "gray90", lty = 1)
+
+for (j in 1:ncol(mat_2025)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_2025)) {
+    valor <- mat_2025[i, j]
+    if (valor >= 6) {
+      y_pos <- acumulat + valor / 2
+      text(bp2[j], y_pos, labels = paste0(round(valor, 1), "%"), cex = 0.68)
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# ---------- llegenda ----------
+par(mar = c(10, 1, 5, 1), xpd = TRUE)
+plot.new()
+
+legend(
+  "center",
+  legend = rev(rownames(mat_2005)),
+  fill = rev(colors_nivell),
+  bty = "o",
+  bg = "white",
+  cex = 0.9,
+  title = "Nivell educatiu"
+)
+
+mtext(
+  "Distribució del nivell educatiu per grup ocupacional a Espanya: comparació entre 2005 i 2025",
+  side = 3,
+  outer = TRUE,
+  line = 1,
+  cex = 1.2
+)
+
+dev.off()
+```
+
+#Gràfic 6.3
+
+```{r}
+library(data.table)
+
+setDT(moda_ocup)
+
+# ordre educatiu de menor a major
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# ordre ocupacions de menys qualificades a més qualificades
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+
+# noms de les ocupacions
+noms_ocup <- c(
+  "9" = "Ocupacions elementals",
+  "8" = "Operadors i muntadors",
+  "7" = "Indústria i construcció qualificades",
+  "6" = "Sector primari qualificat",
+  "5" = "Serveis i vendes",
+  "4" = "Personal administratiu",
+  "3" = "Tècnics i professionals de suport",
+  "2" = "Professionals científics i intel·lectuals",
+  "1" = "Directius i gerents"
+)
+
+# etiquetes nivell educatiu
+moda_ocup[, NFORMA_CAT := fcase(
+  NFORMA == "AN", "Analfabetisme",
+  NFORMA == "P1", "Primària incompleta",
+  NFORMA == "P2", "Primària",
+  NFORMA == "S1", "Secundària 1a etapa",
+  NFORMA == "SG", "Secundària general",
+  NFORMA == "SP", "Secundària professional",
+  NFORMA == "SU", "Educació superior",
+  default = as.character(NFORMA)
+)]
+
+# assegurar ordre
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+moda_ocup[, OCUP1 := factor(as.character(OCUP1), levels = ordre_ocup, ordered = TRUE)]
+
+# calcular percentatges dins de cada ocupació
+graf_ocup <- moda_ocup[
+  , .(pes = sum(pes, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA, NFORMA_CAT)
+]
+
+graf_ocup[, pct := 100 * pes / sum(pes), by = OCUP1]
+
+# passar a taula ampla
+taula <- dcast(
+  graf_ocup,
+  NFORMA_CAT ~ OCUP1,
+  value.var = "pct",
+  fill = 0
+)
+
+# assegurar ordre de files
+ordre_files <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+taula_base <- data.table(NFORMA_CAT = ordre_files)
+taula <- merge(taula_base, taula, by = "NFORMA_CAT", all.x = TRUE, sort = FALSE)
+taula[is.na(taula)] <- 0
+
+# matriu
+mat <- as.matrix(taula[, -1])
+
+# grisos més clars
+grisos <- c("gray97", "gray93", "gray89", "gray85", "gray81", "gray77", "gray73")
+
+# noms de l'eix X
+ocup_labels <- noms_ocup[colnames(mat)]
+
+jpeg("grafic_distribucio_nforma_per_ocupacio_destacat.jpg", width = 3000, height = 1700, res = 220)
+
+par(mar = c(14, 6, 5, 18), xpd = TRUE)
+
+plot(
+  NA,
+  xlim = c(0.5, ncol(mat) + 0.5),
+  ylim = c(0, 100),
+  xaxt = "n",
+  yaxt = "n",
+  xlab = "",
+  ylab = "Percentatge",
+  main = "Nivell educatiu modal de cada ocupació"
+)
+
+axis(1, at = 1:ncol(mat), labels = ocup_labels, las = 2, cex.axis = 0.9)
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+
+for (j in 1:ncol(mat)) {
+  
+  acumulado <- 0
+  fila_max <- which.max(mat[, j])
+  ocup_actual <- colnames(mat)[j]
+  
+  for (i in 1:nrow(mat)) {
+    
+    valor <- mat[i, j]
+    col_actual <- grisos[i]
+    
+    # destacar només la moda de cada ocupació
+    if (i == fila_max) {
+      if (ocup_actual %in% c("9", "8", "7", "6", "5")) {
+        col_actual <- "olivedrab2"
+      } else if (ocup_actual %in% c("4", "3", "2", "1")) {
+        col_actual <- "orange2"
+      }
+    }
+    
+    rect(
+      xleft   = j - 0.35,
+      ybottom = acumulado,
+      xright  = j + 0.35,
+      ytop    = acumulado + valor,
+      col     = col_actual,
+      border  = "white"
+    )
+    
+    if (valor > 3) {
+      text(
+        x = j,
+        y = acumulado + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.72
+      )
+    }
+    
+    acumulado <- acumulado + valor
+  }
+}
+
+legend(
+  "topright",
+  inset = c(-0.30, 0),
+  legend = c(
+    "Secundària 1a etapa",
+    "Educació superior",
+    "Resta de nivells educatius"
+  ),
+  fill = c("olivedrab2", "orange2", "gray85"),
+  cex = 0.9,
+  bty = "o",
+  bg = "white"
+)
+
+dev.off()
+```
+
+#6.4
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) ETIQUETES D'OCUPACIÓ
+# --------------------------------------------------
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+ordre_cols <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció qualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals de suport",
+  "Professionals científics i intel·lectuals",
+  "Directius i gerents"
+)
+
+ordre_cols_labels <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció\nqualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals\nde suport",
+  "Professionals científics\ni intel·lectuals",
+  "Directius i gerents"
+)
+
+# --------------------------------------------------
+# 4) FUNCIÓ PER CREAR TAULA DE DESAJUST D'UN PERÍODE
+# --------------------------------------------------
+crear_taula_desajust <- function(data, any_inici, any_fi) {
+  
+  base_desajust <- data[
+    ANY >= any_inici & ANY <= any_fi &
+    !is.na(AOI) &
+    trimws(as.character(AOI)) != "" &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+    !is.na(FACTOREL),
+    .(
+      OCUP1 = trimws(as.character(OCUP1)),
+      NFORMA = trimws(as.character(NFORMA)),
+      FACTOREL
+    )
+  ]
+  
+  # moda educativa per ocupació
+  moda_ocup <- base_desajust[
+    ,
+    .(pes = sum(FACTOREL, na.rm = TRUE)),
+    by = .(OCUP1, NFORMA)
+  ]
+  
+  moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+  
+  moda_ocup_final <- moda_ocup[
+    order(OCUP1, -pes, NFORMA)
+  ][
+    , .SD[1], by = OCUP1
+  ]
+  
+  setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+  
+  # unir moda a cada observació
+  base_desajust[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+  
+  base_desajust <- merge(
+    base_desajust,
+    moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+    by = "OCUP1",
+    all.x = TRUE
+  )
+  
+  # classificar desajust
+  base_desajust[, DESAJUST_MODA := fcase(
+    NFORMA < NFORMA_MODA, "Infraqualificació",
+    NFORMA == NFORMA_MODA, "Ajust",
+    NFORMA > NFORMA_MODA, "Sobrequalificació"
+  )]
+  
+  base_desajust[, OCUPACIO := etiqueta_ocup(OCUP1)]
+  
+  # resum ponderat
+  resum <- base_desajust[
+    ,
+    .(valor = sum(FACTOREL, na.rm = TRUE)),
+    by = .(OCUPACIO, DESAJUST_MODA)
+  ]
+  
+  resum[, pct := 100 * valor / sum(valor), by = OCUPACIO]
+  
+  # taula ampla
+  taula <- dcast(
+    resum,
+    DESAJUST_MODA ~ OCUPACIO,
+    value.var = "pct",
+    fill = 0
+  )
+  
+  ordre_files <- c("Infraqualificació", "Ajust", "Sobrequalificació")
+  taula_base <- data.table(DESAJUST_MODA = ordre_files)
+  taula <- merge(taula_base, taula, by = "DESAJUST_MODA", all.x = TRUE, sort = FALSE)
+  taula[is.na(taula)] <- 0
+  
+  for (col in ordre_cols) {
+    if (!col %in% names(taula)) taula[, (col) := 0]
+  }
+  
+  taula <- taula[, c("DESAJUST_MODA", ordre_cols), with = FALSE]
+  
+  cols_num <- setdiff(names(taula), "DESAJUST_MODA")
+  taula[, (cols_num) := lapply(.SD, function(x) round(x, 2)), .SDcols = cols_num]
+  
+  return(taula)
+}
+
+# --------------------------------------------------
+# 5) TAULA GLOBAL 2005-2025
+# --------------------------------------------------
+taula_global <- crear_taula_desajust(EPA_2005_2025v2, 2005, 2025)
+
+mat_global <- as.matrix(taula_global[, -1])
+rownames(mat_global) <- taula_global$DESAJUST_MODA
+
+colors_desajust <- c(
+  "brown1",   # Infraqualificació
+  "gray75",       # Ajust
+  "olivedrab2"   # Sobrequalificació
+)
+
+# --------------------------------------------------
+# 6) GRÀFIC GLOBAL
+# --------------------------------------------------
+jpeg("grafic_global_desajust_per_ocupacio.jpg", width = 3600, height = 1700, res = 220)
+
+layout(matrix(c(1, 2), nrow = 1), widths = c(8.8, 1.8))
+par(oma = c(0, 0, 4, 0))
+
+# panell principal
+par(mar = c(10, 6, 5, 2), xpd = FALSE)
+
+bp <- barplot(
+  mat_global,
+  beside = FALSE,
+  col = colors_desajust,
+  border = "white",
+  ylim = c(0, 100),
+  yaxt = "n",
+  xaxt = "n",
+  ylab = "Percentatge",
+  main = "Període 2005-2025"
+)
+
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+axis(1, at = bp, labels = ordre_cols_labels, las = 2, cex.axis = 0.82)
+
+abline(h = seq(0, 100, by = 10), col = "gray90", lty = 1)
+
+for (j in 1:ncol(mat_global)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_global)) {
+    valor <- mat_global[i, j]
+    if (valor >= 6) {
+      text(
+        x = bp[j],
+        y = acumulat + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.68
+      )
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# panell llegenda
+par(mar = c(10, 1, 5, 1), xpd = TRUE)
+plot.new()
+
+legend(
+  "center",
+  legend = c("Infraqualificació", "Ajust", "Sobrequalificació"),
+  fill = colors_desajust,
+  bty = "o",
+  bg = "white",
+  cex = 0.95,
+  title = "Desajust"
+)
+
+mtext(
+  "Distribució del desajust educatiu per grup ocupacional a Espanya",
+  side = 3,
+  outer = TRUE,
+  line = 1,
+  cex = 1.2
+)
+
+dev.off()
+```
+
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) ETIQUETES D'OCUPACIÓ
+# --------------------------------------------------
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+ordre_cols <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció qualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals de suport",
+  "Professionals científics i intel·lectuals",
+  "Directius i gerents"
+)
+
+ordre_cols_labels <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció\nqualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals\nde suport",
+  "Professionals científics\ni intel·lectuals",
+  "Directius i gerents"
+)
+
+# --------------------------------------------------
+# 4) FUNCIÓ PER CREAR TAULA DE DESAJUST D'UN PERÍODE
+# --------------------------------------------------
+crear_taula_desajust <- function(data, any_inici, any_fi) {
+  
+  base_desajust <- data[
+    ANY >= any_inici & ANY <= any_fi &
+    !is.na(AOI) &
+    trimws(as.character(AOI)) != "" &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &
+    !is.na(FACTOREL),
+    .(
+      OCUP1 = trimws(as.character(OCUP1)),
+      NFORMA = trimws(as.character(NFORMA)),
+      FACTOREL
+    )
+  ]
+  
+  moda_ocup <- base_desajust[
+    ,
+    .(pes = sum(FACTOREL, na.rm = TRUE)),
+    by = .(OCUP1, NFORMA)
+  ]
+  
+  moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+  
+  moda_ocup_final <- moda_ocup[
+    order(OCUP1, -pes, NFORMA)
+  ][
+    , .SD[1], by = OCUP1
+  ]
+  
+  setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+  
+  base_desajust[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+  
+  base_desajust <- merge(
+    base_desajust,
+    moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+    by = "OCUP1",
+    all.x = TRUE
+  )
+  
+  base_desajust[, DESAJUST_MODA := fcase(
+    NFORMA < NFORMA_MODA, "Infraqualificació",
+    NFORMA == NFORMA_MODA, "Ajust",
+    NFORMA > NFORMA_MODA, "Sobrequalificació"
+  )]
+  
+  base_desajust[, OCUPACIO := etiqueta_ocup(OCUP1)]
+  
+  resum <- base_desajust[
+    ,
+    .(valor = sum(FACTOREL, na.rm = TRUE)),
+    by = .(OCUPACIO, DESAJUST_MODA)
+  ]
+  
+  resum[, pct := 100 * valor / sum(valor), by = OCUPACIO]
+  
+  taula <- dcast(
+    resum,
+    DESAJUST_MODA ~ OCUPACIO,
+    value.var = "pct",
+    fill = 0
+  )
+  
+  ordre_files <- c("Infraqualificació", "Ajust", "Sobrequalificació")
+  taula_base <- data.table(DESAJUST_MODA = ordre_files)
+  taula <- merge(taula_base, taula, by = "DESAJUST_MODA", all.x = TRUE, sort = FALSE)
+  taula[is.na(taula)] <- 0
+  
+  for (col in ordre_cols) {
+    if (!col %in% names(taula)) taula[, (col) := 0]
+  }
+  
+  taula <- taula[, c("DESAJUST_MODA", ordre_cols), with = FALSE]
+  
+  cols_num <- setdiff(names(taula), "DESAJUST_MODA")
+  taula[, (cols_num) := lapply(.SD, function(x) round(x, 2)), .SDcols = cols_num]
+  
+  return(taula)
+}
+
+# --------------------------------------------------
+# 5) TAULES 2005 I 2025
+# --------------------------------------------------
+taula_2005 <- crear_taula_desajust(EPA_2005_2025v2, 2005, 2005)
+taula_2025 <- crear_taula_desajust(EPA_2005_2025v2, 2025, 2025)
+
+mat_2005 <- as.matrix(taula_2005[, -1])
+rownames(mat_2005) <- taula_2005$DESAJUST_MODA
+
+mat_2025 <- as.matrix(taula_2025[, -1])
+rownames(mat_2025) <- taula_2025$DESAJUST_MODA
+
+colors_desajust <- c(
+  "brown1",
+  "gray75",
+  "olivedrab2"
+)
+
+# --------------------------------------------------
+# 6) GRÀFIC COMPARATIU
+# --------------------------------------------------
+jpeg("grafic_desajust_2005_vs_2025.jpg", width = 3800, height = 1700, res = 220)
+
+layout(matrix(c(1, 2, 3), nrow = 1), widths = c(5, 5, 2.2))
+par(oma = c(0, 0, 4, 0))
+
+# any 2005
+par(mar = c(10, 6, 5, 2), xpd = FALSE)
+
+bp1 <- barplot(
+  mat_2005,
+  beside = FALSE,
+  col = colors_desajust,
+  border = "white",
+  ylim = c(0, 100),
+  yaxt = "n",
+  xaxt = "n",
+  ylab = "Percentatge",
+  main = "Any 2005"
+)
+
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+axis(1, at = bp1, labels = ordre_cols_labels, las = 2, cex.axis = 0.82)
+
+abline(h = seq(0, 100, by = 10), col = "gray90", lty = 1)
+
+for (j in 1:ncol(mat_2005)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_2005)) {
+    valor <- mat_2005[i, j]
+    if (valor >= 6) {
+      text(
+        x = bp1[j],
+        y = acumulat + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.68
+      )
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# any 2025
+par(mar = c(10, 6, 5, 2), xpd = FALSE)
+
+bp2 <- barplot(
+  mat_2025,
+  beside = FALSE,
+  col = colors_desajust,
+  border = "white",
+  ylim = c(0, 100),
+  yaxt = "n",
+  xaxt = "n",
+  ylab = "Percentatge",
+  main = "Any 2025"
+)
+
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+axis(1, at = bp2, labels = ordre_cols_labels, las = 2, cex.axis = 0.82)
+
+abline(h = seq(0, 100, by = 10), col = "gray90", lty = 1)
+
+for (j in 1:ncol(mat_2025)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_2025)) {
+    valor <- mat_2025[i, j]
+    if (valor >= 6) {
+      text(
+        x = bp2[j],
+        y = acumulat + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.68
+      )
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# llegenda comuna
+par(mar = c(10, 1, 5, 1), xpd = TRUE)
+plot.new()
+
+legend(
+  "center",
+  legend = c("Infraqualificació", "Ajust", "Sobrequalificació"),
+  fill = colors_desajust,
+  bty = "o",
+  bg = "white",
+  cex = 0.95,
+  title = "Desajust"
+)
+
+mtext(
+  "Distribució del desajust educatiu per grup ocupacional a Espanya: comparació entre 2005 i 2025",
+  side = 3,
+  outer = TRUE,
+  line = 1,
+  cex = 1.2
+)
+
+dev.off()
+```
+
+#6.5
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) BASE: NOMÉS OCUPATS
+# --------------------------------------------------
+base_desajust <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  trimws(as.character(AOI)) != "" &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(SEXO1) & trimws(as.character(SEXO1)) %in% c("1", "6") &
+  !is.na(FACTOREL),
+  .(
+    ANY,
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    SEXO1 = trimws(as.character(SEXO1)),
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 4) MODA GLOBAL PER OCUPACIÓ (REFERÈNCIA COMUNA)
+# --------------------------------------------------
+moda_ocup <- base_desajust[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 5) UNIR MODA A CADA OBSERVACIÓ
+# --------------------------------------------------
+base_desajust[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_desajust <- merge(
+  base_desajust,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+# --------------------------------------------------
+# 6) CLASSIFICAR DESAJUST
+# --------------------------------------------------
+base_desajust[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+base_desajust[, SEXE := fifelse(SEXO1 == "1", "Homes", "Dones")]
+
+# --------------------------------------------------
+# 7) RESUM PONDERAT PER ANY, SEXE I DESAJUST
+# --------------------------------------------------
+resum <- base_desajust[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, SEXE, DESAJUST_MODA)
+]
+
+# assegurar totes les combinacions
+base_anys <- CJ(
+  ANY = 2005:2025,
+  SEXE = c("Homes", "Dones"),
+  DESAJUST_MODA = c("Infraqualificació", "Ajust", "Sobrequalificació")
+)
+
+resum <- merge(base_anys, resum, by = c("ANY", "SEXE", "DESAJUST_MODA"), all.x = TRUE)
+resum[is.na(valor), valor := 0]
+
+# percentatge dins de cada any i sexe
+resum[, pct := 100 * valor / sum(valor), by = .(ANY, SEXE)]
+
+# --------------------------------------------------
+# 8) TAULES PER ALS DOS PANELLS
+# --------------------------------------------------
+taula_homes <- dcast(
+  resum[SEXE == "Homes"],
+  DESAJUST_MODA ~ ANY,
+  value.var = "pct",
+  fill = 0
+)
+
+taula_dones <- dcast(
+  resum[SEXE == "Dones"],
+  DESAJUST_MODA ~ ANY,
+  value.var = "pct",
+  fill = 0
+)
+
+ordre_files <- c("Infraqualificació", "Ajust", "Sobrequalificació")
+
+taula_base <- data.table(DESAJUST_MODA = ordre_files)
+
+taula_homes <- merge(taula_base, taula_homes, by = "DESAJUST_MODA", all.x = TRUE, sort = FALSE)
+taula_dones <- merge(taula_base, taula_dones, by = "DESAJUST_MODA", all.x = TRUE, sort = FALSE)
+
+taula_homes[is.na(taula_homes)] <- 0
+taula_dones[is.na(taula_dones)] <- 0
+
+mat_homes <- as.matrix(taula_homes[, -1])
+rownames(mat_homes) <- taula_homes$DESAJUST_MODA
+
+mat_dones <- as.matrix(taula_dones[, -1])
+rownames(mat_dones) <- taula_dones$DESAJUST_MODA
+
+# --------------------------------------------------
+# 9) COLORS
+# --------------------------------------------------
+colors_desajust <- c(
+  "brown2",   # Infraqualificació
+  "gray75",       # Ajust
+  "olivedrab2"   # Sobrequalificació
+)
+
+# --------------------------------------------------
+# 10) GRÀFIC
+# --------------------------------------------------
+jpeg("grafic_desajust_sexe_evolucio_2005_2025.jpg", width = 3800, height = 1700, res = 220)
+
+layout(matrix(c(1, 2, 3), nrow = 1), widths = c(5, 5, 2.2))
+par(oma = c(0, 0, 4, 0))
+
+# ---------- panell homes ----------
+par(mar = c(8, 6, 5, 2), xpd = FALSE)
+
+bp1 <- barplot(
+  mat_homes,
+  beside = FALSE,
+  col = colors_desajust,
+  border = "white",
+  ylim = c(0, 100),
+  yaxt = "n",
+  xaxt = "n",
+  ylab = "Percentatge",
+  main = "Homes"
+)
+
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+axis(1, at = bp1, labels = colnames(mat_homes), las = 2, cex.axis = 0.8)
+
+abline(h = seq(0, 100, by = 10), col = "gray90")
+
+for (j in 1:ncol(mat_homes)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_homes)) {
+    valor <- mat_homes[i, j]
+    if (valor >= 8) {
+      text(
+        x = bp1[j],
+        y = acumulat + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.58
+      )
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# ---------- panell dones ----------
+par(mar = c(8, 6, 5, 2), xpd = FALSE)
+
+bp2 <- barplot(
+  mat_dones,
+  beside = FALSE,
+  col = colors_desajust,
+  border = "white",
+  ylim = c(0, 100),
+  yaxt = "n",
+  xaxt = "n",
+  ylab = "Percentatge",
+  main = "Dones"
+)
+
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+axis(1, at = bp2, labels = colnames(mat_dones), las = 2, cex.axis = 0.8)
+
+abline(h = seq(0, 100, by = 10), col = "gray90")
+
+for (j in 1:ncol(mat_dones)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat_dones)) {
+    valor <- mat_dones[i, j]
+    if (valor >= 8) {
+      text(
+        x = bp2[j],
+        y = acumulat + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.58
+      )
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+# ---------- llegenda ----------
+par(mar = c(8, 1, 5, 1), xpd = TRUE)
+plot.new()
+
+legend(
+  "center",
+  legend = c("Infraqualificació", "Ajust", "Sobrequalificació"),
+  fill = colors_desajust,
+  bty = "o",
+  bg = "white",
+  cex = 0.95,
+  title = "Desajust"
+)
+
+mtext(
+  "Evolució del desajust educatiu per sexe a Espanya (2005-2025)",
+  side = 3,
+  outer = TRUE,
+  line = 1,
+  cex = 1.2
+)
+
+dev.off()
+```
+
+#6.5
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) BASE: NOMÉS OCUPATS
+# --------------------------------------------------
+base_desajust <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  trimws(as.character(AOI)) != "" &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &
+  !is.na(SEXO1) & trimws(as.character(SEXO1)) %in% c("1", "6") &
+  !is.na(FACTOREL),
+  .(
+    ANY,
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    SEXO1 = trimws(as.character(SEXO1)),
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 4) MODA EDUCATIVA PER OCUPACIÓ
+# --------------------------------------------------
+moda_ocup <- base_desajust[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 5) UNIR MODA A CADA OBSERVACIÓ
+# --------------------------------------------------
+base_desajust[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_desajust <- merge(
+  base_desajust,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+# --------------------------------------------------
+# 6) CLASSIFICAR DESAJUST
+# --------------------------------------------------
+base_desajust[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+# --------------------------------------------------
+# 7) ETIQUETAR SEXE
+# --------------------------------------------------
+base_desajust[, SEXE := fifelse(SEXO1 == "1", "Homes", "Dones")]
+
+# --------------------------------------------------
+# 8) PERCENTATGES PER ANY, SEXE I DESAJUST
+# --------------------------------------------------
+resum <- base_desajust[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, SEXE, DESAJUST_MODA)
+]
+
+resum[, pct := 100 * valor / sum(valor), by = .(ANY, SEXE)]
+
+# --------------------------------------------------
+# 9) CALCULAR GAP = DONES - HOMES
+# --------------------------------------------------
+taula_gap <- dcast(
+  resum,
+  ANY + DESAJUST_MODA ~ SEXE,
+  value.var = "pct",
+  fill = 0
+)
+
+taula_gap[, GAP := Dones - Homes]
+
+taula_gap_wide <- dcast(
+  taula_gap,
+  ANY ~ DESAJUST_MODA,
+  value.var = "GAP",
+  fill = 0 
+)
+
+setcolorder(taula_gap_wide, c("ANY", "Infraqualificació", "Ajust", "Sobrequalificació"))
+
+# --------------------------------------------------
+# 10) GRÀFIC
+# --------------------------------------------------
+mat <- as.matrix(taula_gap_wide[, -1])
+
+colors_gap <- c(
+  "brown3",
+  "gray40",
+  "olivedrab2"
+)
+
+jpeg("grafic_gap_sexe_desajust_unic.jpg", width = 2400, height = 1200, res = 200)
+
+# més marge a la dreta per la llegenda
+par(mar = c(5, 6, 5, 18), xpd = FALSE)
+
+matplot(
+  taula_gap_wide$ANY,
+  mat,
+  type = "l",
+  lty = 1,
+  lwd = 3,
+  col = colors_gap,
+  xlab = "Any",
+  ylab = "Gap en punts percentuals",
+  main = "Evolució del gap per sexe en el desajust educatiu a Espanya (2005-2025)",
+  xaxt = "n"
+)
+
+axis(1, at = seq(2005, 2025, by = 2))
+
+# línies guia només dins del requadre
+abline(v = seq(2005, 2025, by = 1), col = "gray92", lty = 3)
+abline(h = pretty(range(mat, na.rm = TRUE)), col = "gray92", lty = 3)
+
+# línia del 0 només dins del quadre
+usr <- par("usr")
+segments(
+  x0 = min(taula_gap_wide$ANY),
+  y0 = 0,
+  x1 = max(taula_gap_wide$ANY),
+  y1 = 0,
+  lty = 2,
+  lwd = 1.5,
+  col = "black"
+)
+
+# últim punt i valor
+for(i in 1:ncol(mat)){
+  points(
+    taula_gap_wide$ANY[nrow(taula_gap_wide)],
+    mat[nrow(mat), i],
+    pch = 19,
+    col = colors_gap[i],
+    cex = 1.2
+  )
+  text(
+    taula_gap_wide$ANY[nrow(taula_gap_wide)] -0.15,
+    mat[nrow(mat), i],
+    labels = paste0(round(mat[nrow(mat), i], 2)),
+    col = colors_gap[i],
+    cex = 0.8,
+    pos = 4
+  )
+}
+
+# llegenda fora del gràfic sense solapar
+legend(
+  "topright",
+  inset = c(-0.40, 0),
+  legend = c(
+    "Infraqualificació\n(dones - homes)",
+    "Ajust\n(dones - homes)",
+    "Sobrequalificació\n(dones - homes)"
+  ),
+  col = colors_gap,
+  lty = 1,
+  lwd = 3,
+  cex = 0.8,
+  bty = "o",
+  bg = "white",
+  xpd = TRUE,
+   y.intersp = 1.3
+)
+
+dev.off()
+```
+
+#6.5
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) UNIFICAR LA VARIABLE D'EDAT EN TRAMS
+#    (pot estar a EDAD5, EDAT1 o EDAD1)
+# --------------------------------------------------
+EPA_2005_2025v2[, EDAT_TRAM := NA_character_]
+
+if ("EDAD5" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[
+    is.na(EDAT_TRAM) & !is.na(EDAD5) & trimws(as.character(EDAD5)) != "",
+    EDAT_TRAM := trimws(as.character(EDAD5))
+  ]
+}
+
+if ("EDAT1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[
+    is.na(EDAT_TRAM) & !is.na(EDAT1) & trimws(as.character(EDAT1)) != "",
+    EDAT_TRAM := trimws(as.character(EDAT1))
+  ]
+}
+
+if ("EDAD1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[
+    is.na(EDAT_TRAM) & !is.na(EDAD1) & trimws(as.character(EDAD1)) != "",
+    EDAT_TRAM := trimws(as.character(EDAD1))
+  ]
+}
+
+# --------------------------------------------------
+# 3) CREAR GRUPS D'EDAT HARMONITZATS
+# --------------------------------------------------
+EPA_2005_2025v2[, GRUP_EDAT := fcase(
+  EDAT_TRAM %in% c("16", "20", "25"), "16-29",
+  EDAT_TRAM %in% c("30", "35"),       "30-39",
+  EDAT_TRAM %in% c("40", "45", "50"), "40-54",
+  EDAT_TRAM %in% c("55", "60", "65"), "55 o més",
+  default = NA_character_
+)]
+
+# --------------------------------------------------
+# 4) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 5) BASE: NOMÉS OCUPATS, EXCLOENT MILITARS
+# --------------------------------------------------
+base_edat <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  trimws(as.character(AOI)) != "" &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &
+  !is.na(GRUP_EDAT) &
+  !is.na(FACTOREL),
+  .(
+    ANY,
+    FACTOREL,
+    NFORMA = trimws(as.character(NFORMA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    GRUP_EDAT
+  )
+]
+
+# --------------------------------------------------
+# 6) CALCULAR LA MODA EDUCATIVA PER OCUPACIÓ
+# --------------------------------------------------
+moda_ocup <- base_edat[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 7) UNIR MODA I CONSTRUIR DESAJUST
+# --------------------------------------------------
+base_edat[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_edat <- merge(
+  base_edat,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+base_edat[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+# --------------------------------------------------
+# 8) RESUM PER ANY, GRUP D'EDAT I DESAJUST
+# --------------------------------------------------
+resum_edat <- base_edat[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, GRUP_EDAT, DESAJUST_MODA)
+]
+
+resum_edat[, pct := 100 * valor / sum(valor), by = .(ANY, GRUP_EDAT)]
+
+ordre_edat <- c("16-29", "30-39", "40-54", "55 o més")
+resum_edat[, GRUP_EDAT := factor(GRUP_EDAT, levels = ordre_edat)]
+
+# --------------------------------------------------
+# 9) COLORS
+# --------------------------------------------------
+colores <- c(
+  "Infraqualificació" = "indianred3",
+  "Ajust" = "gray55",
+  "Sobrequalificació" = "steelblue4"
+)
+
+# --------------------------------------------------
+# 10) LÍMIT Y GLOBAL
+#     si cap a 70 o 80, ho tallem aquí;
+#     si no, pugem just el necessari
+# --------------------------------------------------
+ymax_real <- max(resum_edat$pct, na.rm = TRUE)
+
+if (ymax_real <= 70) {
+  ymax <- 70
+} else if (ymax_real <= 80) {
+  ymax <- 80
+} else {
+  ymax <- ceiling(ymax_real / 5) * 5
+}
+
+# --------------------------------------------------
+# 11) FUNCIÓ DE DIBUIX
+# --------------------------------------------------
+dibuixar_panell <- function(sub, titol) {
+  
+  taula <- dcast(
+    sub,
+    ANY ~ DESAJUST_MODA,
+    value.var = "pct",
+    fill = 0
+  )
+  
+  for (nm in c("Infraqualificació", "Ajust", "Sobrequalificació")) {
+    if (!nm %in% names(taula)) taula[, (nm) := 0]
+  }
+  
+  setcolorder(taula, c("ANY", "Infraqualificació", "Ajust", "Sobrequalificació"))
+  
+  x <- taula$ANY
+  y <- as.matrix(taula[, -1])
+  
+  matplot(
+    x,
+    y,
+    type = "l",
+    lty = 1,
+    lwd = 2.4,
+    col = colores,
+    xlab = "Any",
+    ylab = "Percentatge",
+    main = paste("Grup d'edat", titol),
+    xaxt = "n",
+    yaxt = "n",
+    ylim = c(0, ymax)
+  )
+  
+  axis(1, at = seq(2005, 2025, by = 2), cex.axis = 0.9)
+  axis(2, at = seq(0, ymax, by = 5), labels = paste0(seq(0, ymax, by = 5), "%"), cex.axis = 0.9)
+  
+  abline(v = seq(2005, 2025, by = 1), col = "gray92", lty = 3)
+  abline(h = seq(0, ymax, by = 5), col = "gray92", lty = 3)
+  box()
+  
+  # marcar màxim i mínim de cada línia
+  for (i in 1:ncol(y)) {
+    yi <- y[, i]
+    
+    idx_max <- which.max(yi)
+    idx_min <- which.min(yi)
+    
+    # punt màxim
+    points(
+      x[idx_max], yi[idx_max],
+      pch = 19,
+      cex = 1.2,
+      col = colores[i]
+    )
+    
+    # punt mínim
+    points(
+      x[idx_min], yi[idx_min],
+      pch = 1,
+      cex = 1.2,
+      lwd = 2,
+      col = colores[i]
+    )
+    
+    # etiquetes dels valors
+    text(
+      x[idx_max], yi[idx_max] + 1.2,
+      labels = round(yi[idx_max], 1),
+      cex = 0.75,
+      col = colores[i]
+    )
+    
+    text(
+      x[idx_min], yi[idx_min] - 1.2,
+      labels = round(yi[idx_min], 1),
+      cex = 0.75,
+      col = colores[i]
+    )
+  }
+}
+
+# --------------------------------------------------
+# 12) GRÀFIC FINAL
+# --------------------------------------------------
+jpeg("grafic_desajust_edat_2005_2025.jpg", width = 6800, height = 1500, res = 200)
+
+layout(matrix(c(1, 2, 3, 4, 5), nrow = 1), widths = c(5.5, 5.5, 5.5, 5.5, 3.0))
+par(oma = c(0, 0, 4, 0))
+
+# 4 panells
+for (g in ordre_edat) {
+  par(mar = c(5, 5, 4, 1))
+  dibuixar_panell(resum_edat[GRUP_EDAT == g], g)
+}
+
+# panell de llegenda separat
+par(mar = c(5, 0, 4, 0), xpd = TRUE)
+plot.new()
+
+legend(
+  "center",
+  legend = c(
+    "Infraqualificació",
+    "Ajust",
+    "Sobrequalificació",
+    "Màxim",
+    "Mínim"
+  ),
+  col = c(colores, "black", "black"),
+  lty = c(1, 1, 1, NA, NA),
+  lwd = c(2.4, 2.4, 2.4, NA, NA),
+  pch = c(NA, NA, NA, 19, 1),
+  pt.cex = c(NA, NA, NA, 1.2, 1.2),
+  bty = "o",
+  bg = "white",
+  cex = 1.0
+)
+
+mtext(
+  "Evolució del desajust educatiu per grups d'edat a Espanya (2005-2025)",
+  outer = TRUE,
+  cex = 1.35,
+  line = 1
+)
+
+dev.off()
+```
+
+#6.5.6
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) NOMS DE LES CCAA
+# --------------------------------------------------
+noms_ccaa <- c(
+  "01" = "Andalusia",
+  "02" = "Aragó",
+  "03" = "Astúries",
+  "04" = "Illes Balears",
+  "05" = "Canàries",
+  "06" = "Cantàbria",
+  "07" = "Castella i Lleó",
+  "08" = "Castella-La Manxa",
+  "09" = "Catalunya",
+  "10" = "Comunitat Valenciana",
+  "11" = "Extremadura",
+  "12" = "Galícia",
+  "13" = "Madrid",
+  "14" = "Múrcia",
+  "15" = "Navarra",
+  "16" = "País Basc",
+  "17" = "La Rioja",
+  "51" = "Ceuta",
+  "52" = "Melilla"
+)
+
+ordre_ccaa <- c(
+  "Andalusia", "Aragó", "Astúries", "Illes Balears", "Canàries",
+  "Cantàbria", "Castella i Lleó", "Castella-La Manxa", "Catalunya",
+  "Comunitat Valenciana", "Extremadura", "Galícia", "Madrid",
+  "Múrcia", "Navarra", "País Basc", "La Rioja", "Ceuta", "Melilla"
+)
+
+# --------------------------------------------------
+# 4) BASE: NOMÉS OCUPATS
+# --------------------------------------------------
+base_ccaa <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  trimws(as.character(AOI)) != "" &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(CCAA) & trimws(as.character(CCAA)) != "" &
+  !is.na(FACTOREL),
+  .(
+    CCAA = sprintf("%02d", as.integer(CCAA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 5) MODA EDUCATIVA GLOBAL PER OCUPACIÓ
+# --------------------------------------------------
+moda_ocup <- base_ccaa[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 6) UNIR MODA I CLASSIFICAR DESAJUST
+# --------------------------------------------------
+base_ccaa[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_ccaa <- merge(
+  base_ccaa,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+base_ccaa[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+# --------------------------------------------------
+# 7) RESUM PER CCAA
+# --------------------------------------------------
+resum_ccaa <- base_ccaa[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(CCAA, DESAJUST_MODA)
+]
+
+resum_ccaa[, pct := 100 * valor / sum(valor), by = CCAA]
+
+# només infra i sobre
+resum_ccaa <- resum_ccaa[DESAJUST_MODA %in% c("Infraqualificació", "Sobrequalificació")]
+
+# afegir nom CCAA
+resum_ccaa[, CCAA_NOM := noms_ccaa[CCAA]]
+resum_ccaa[, CCAA_NOM := factor(CCAA_NOM, levels = ordre_ccaa)]
+
+# --------------------------------------------------
+# 8) TAULA AMPLA
+# --------------------------------------------------
+taula_ccaa <- dcast(
+  resum_ccaa,
+  CCAA_NOM ~ DESAJUST_MODA,
+  value.var = "pct",
+  fill = 0
+)
+
+setorder(taula_ccaa, CCAA_NOM)
+taula_ccaa[, CCAA_NOM := as.character(CCAA_NOM)]
+
+# assegurar ordre de columnes
+taula_ccaa <- taula_ccaa[, .(
+  CCAA_NOM,
+  Infraqualificació,
+  Sobrequalificació
+)]
+
+# matriu pel heatmap
+mat <- as.matrix(taula_ccaa[, -1])
+rownames(mat) <- taula_ccaa$CCAA_NOM
+
+# --------------------------------------------------
+# 9) PALETA I LÍMITS
+# --------------------------------------------------
+pal <- colorRampPalette(c("white", "bisque", "bisque3", "bisque4"))(100)
+lim <- max(mat, na.rm = TRUE)
+
+# --------------------------------------------------
+# 10) HEATMAP
+# --------------------------------------------------
+jpeg("heatmap_ccaa_infra_sobre.jpg", width = 2600, height = 1800, res = 220)
+
+layout(matrix(c(1, 2), nrow = 1), widths = c(8, 1.4))
+par(oma = c(0, 0, 4, 0))
+
+# heatmap principal
+par(mar = c(6, 14, 4, 2))
+
+image(
+  x = 1:ncol(mat),
+  y = 1:nrow(mat),
+  z = t(mat[nrow(mat):1, ]),
+  col = pal,
+  zlim = c(0, lim),
+  axes = FALSE,
+  xlab = "",
+  ylab = ""
+)
+
+axis(1, at = 1:ncol(mat), labels = colnames(mat), las = 1, cex.axis = 1)
+axis(2, at = 1:nrow(mat), labels = rev(rownames(mat)), las = 1, cex.axis = 0.9)
+
+abline(v = seq(0.5, ncol(mat) + 0.5, by = 1), col = "gray85")
+abline(h = seq(0.5, nrow(mat) + 0.5, by = 1), col = "gray85")
+
+# valors dins de cada cel·la
+for (i in 1:nrow(mat)) {
+  for (j in 1:ncol(mat)) {
+    valor <- mat[i, j]
+    text(
+      x = j,
+      y = nrow(mat) - i + 1,
+      labels = round(valor, 1),
+      cex = 0.8
+    )
+  }
+}
+
+# llegenda
+par(mar = c(6, 2, 4, 6))
+
+legend_y <- seq(0, lim, length.out = 101)
+legend_z <- matrix(seq(0, lim, length.out = 100), nrow = 1)
+
+image(
+  x = c(0, 1),
+  y = legend_y,
+  z = legend_z,
+  col = pal,
+  zlim = c(0, lim),
+  axes = FALSE,
+  xlab = "",
+  ylab = ""
+)
+
+axis(4, at = pretty(c(0, lim)), las = 2, cex.axis = 0.9)
+mtext("Percentatge", side = 4, line = 3)
+
+mtext(
+  "Percentatge d'infraqualificació i sobrequalificació per comunitat autònoma (2005-2025)",
+  outer = TRUE,
+  cex = 1.25,
+  line = 1
+)
+
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Moda ponderada del nivell educatiu dins de cada grup ocupacional
+````{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# es defineix l'ordre educatiu de menor a major nivell
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# resum ponderat per ocupació i nivell educatiu
+# així es coneix quin pes poblacional total té cada combinació ocupació–nivell educatiu.
+moda_ocup <- EPA_2005_2025v2[
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure ocupacions militars
+  !is.na(FACTOREL),
+  .(
+    pes = sum(FACTOREL, na.rm = TRUE)
+  ),
+  by = .(
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA))
+  )
+]
+
+# ordre del nivell educatiu
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+# quedar-se amb la moda de cada ocupació
+# si hi hagués empat, es queda amb la primera segons l'ordre educatiu definit
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+# etiquetes del nivell educatiu
+moda_ocup_final[, NFORMA_CAT := fcase(
+  as.character(NFORMA) == "AN", "Analfabetisme",
+  as.character(NFORMA) == "P1", "Primària incompleta",
+  as.character(NFORMA) == "P2", "Primària",
+  as.character(NFORMA) == "S1", "Secundària 1a etapa",
+  as.character(NFORMA) == "SG", "Secundària general",
+  as.character(NFORMA) == "SP", "Secundària professional",
+  as.character(NFORMA) == "SU", "Educació superior",
+  default = as.character(NFORMA)
+)]
+
+# etiquetes de l'ocupació
+moda_ocup_final[, OCUP_CAT := fcase(
+  OCUP1 == "1", "Directius i gerents",
+  OCUP1 == "2", "Professionals científics i intel·lectuals",
+  OCUP1 == "3", "Tècnics i professionals de suport",
+  OCUP1 == "4", "Personal administratiu",
+  OCUP1 == "5", "Serveis i vendes",
+  OCUP1 == "6", "Sector primari qualificat",
+  OCUP1 == "7", "Indústria i construcció qualificades",
+  OCUP1 == "8", "Operadors i muntadors",
+  OCUP1 == "9", "Ocupacions elementals",
+  default = OCUP1
+)]
+
+# ordenar l'ocupació menys qualificada a la més alta
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+moda_ocup_final[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(moda_ocup_final, OCUP1)
+
+# taula final
+resultat_moda <- moda_ocup_final[, .(
+  OCUP1 = as.character(OCUP1),
+  OCUPACIO = OCUP_CAT,
+  MODA_NFORMA = as.character(NFORMA),
+  MODA_NFORMA_DESC = NFORMA_CAT,
+  PES_MODA = round(pes, 2)
+)]
+
+print(resultat_moda)
+View(resultat_moda)
+
+````
+
+#% desajust educatiu vs moda
+````{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# ordre educatiu de menor a major nivell
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# 1) base: només ocupats, amb valors útils
+base_desajust <- EPA_2005_2025v2[
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(FACTOREL),
+  .(
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+# 2) calcular la moda educativa per ocupació (ponderada amb FACTOREL)
+moda_ocup <- base_desajust[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+# si hi ha empat, es queda amb la primera segons l'ordre educatiu
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# 3) afegir la moda a cada observació
+base_desajust[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_desajust <- merge(
+  base_desajust,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+# 4) classificar desajust segons la moda
+base_desajust[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+# 5) etiquetes de l'ocupació
+base_desajust[, OCUP_CAT := fcase(
+  OCUP1 == "1", "Directius i gerents",
+  OCUP1 == "2", "Professionals científics i intel·lectuals",
+  OCUP1 == "3", "Tècnics i professionals de suport",
+  OCUP1 == "4", "Personal administratiu",
+  OCUP1 == "5", "Serveis i vendes",
+  OCUP1 == "6", "Sector primari qualificat",
+  OCUP1 == "7", "Indústria i construcció qualificades",
+  OCUP1 == "8", "Operadors i muntadors",
+  OCUP1 == "9", "Ocupacions elementals",
+  default = OCUP1
+)]
+
+# 6) resum ponderat per ocupació i tipus de desajust
+taula_desajust <- base_desajust[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, OCUP_CAT, DESAJUST_MODA)
+]
+
+# 7) percentatges dins de cada ocupació
+taula_desajust[, pct := 100 * pes / sum(pes), by = .(OCUP1, OCUP_CAT)]
+
+# 8) passar a format ample
+taula_final <- dcast(
+  taula_desajust,
+  OCUP1 + OCUP_CAT ~ DESAJUST_MODA,
+  value.var = "pct",
+  fill = 0
+)
+
+# 9) assegurar columnes
+for (col in c("Infraqualificació", "Ajust", "Sobrequalificació")) {
+  if (!col %in% names(taula_final)) taula_final[, (col) := 0]
+}
+
+# 10) ordenar ocupacions de la 9 a la 1
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+taula_final[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(taula_final, OCUP1)
+
+# 11) arrodonir
+taula_final[, `:=`(
+  Infraqualificació = round(Infraqualificació, 2),
+  Ajust = round(Ajust, 2),
+  Sobrequalificació = round(Sobrequalificació, 2)
+)]
+
+# 12) resultat final
+resultat_desajust_ocup <- taula_final[, .(
+  OCUP1 = as.character(OCUP1),
+  OCUPACIO = OCUP_CAT,
+  `Percentatge infraqualificació` = Infraqualificació,
+  `Percentatge sobrequalificació` = Sobrequalificació
+)]
+
+print(resultat_desajust_ocup)
+View(resultat_desajust_ocup)
+````
+
+#%infra/sobre vs moda any 2005 vs 2025
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# si no existeix ANY, crea'l a partir de CICLO
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# ordre educatiu
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# etiquetes educació
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+# etiquetes ocupació
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "1", "Directius i gerents",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "3", "Tècnics i professionals de suport",
+    x == "4", "Personal administratiu",
+    x == "5", "Serveis i vendes",
+    x == "6", "Sector primari qualificat",
+    x == "7", "Indústria i construcció qualificades",
+    x == "8", "Operadors i muntadors",
+    x == "9", "Ocupacions elementals",
+    default = x
+  )
+}
+
+anys_objectiu <- c(2005L, 2025L)
+
+# base de treball
+base <- EPA_2005_2025v2[
+  ANY %in% anys_objectiu &
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(FACTOREL),
+  .(
+    ANY,
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+# -------------------------------------------------
+# TAULA 1: MODA DEL NIVELL EDUCATIU PER OCUPACIÓ
+# -------------------------------------------------
+
+moda_any_ocup <- base[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, OCUP1, NFORMA)
+]
+
+moda_any_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+# si hi ha empat, es queda amb la primera segons l'ordre educatiu
+moda_any_ocup_final <- moda_any_ocup[
+  order(ANY, OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = .(ANY, OCUP1)
+]
+
+moda_any_ocup_final[, NFORMA_DESC := etiqueta_nforma(as.character(NFORMA))]
+moda_any_ocup_final[, OCUPACIO := etiqueta_ocup(OCUP1)]
+
+taula_moda <- dcast(
+  moda_any_ocup_final[, .(ANY, OCUP1, OCUPACIO, NFORMA_DESC)],
+  OCUP1 + OCUPACIO ~ ANY,
+  value.var = "NFORMA_DESC"
+)
+
+setnames(taula_moda, c("2005", "2025"), c("Moda 2005", "Moda 2025"))
+
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+taula_moda[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(taula_moda, OCUP1)
+taula_moda[, OCUP1 := as.character(OCUP1)]
+
+print(taula_moda)
+View(taula_moda)
+
+# -------------------------------------------------
+# TAULA 2: % INFRA I % SOBRE PER OCUPACIÓ I ANY
+# -------------------------------------------------
+
+# afegir la moda de cada any i ocupació a cada observació
+setnames(
+  moda_any_ocup_final[, .(ANY, OCUP1, NFORMA_MODA = NFORMA)],
+  "NFORMA_MODA",
+  "NFORMA_MODA"
+)
+
+base[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+base <- merge(
+  base,
+  moda_any_ocup_final[, .(ANY, OCUP1, NFORMA_MODA = NFORMA)],
+  by = c("ANY", "OCUP1"),
+  all.x = TRUE
+)
+
+# classificar desajust
+base[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+base[, OCUPACIO := etiqueta_ocup(OCUP1)]
+
+# resum ponderat
+taula_desajust <- base[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, OCUP1, OCUPACIO, DESAJUST_MODA)
+]
+
+# percentatges dins de cada ANY i ocupació
+taula_desajust[, pct := 100 * pes / sum(pes), by = .(ANY, OCUP1, OCUPACIO)]
+
+# ens quedem amb infra i sobre
+taula_desajust <- taula_desajust[DESAJUST_MODA %in% c("Infraqualificació", "Sobrequalificació")]
+
+# crear etiqueta columna
+taula_desajust[, col_any := fifelse(
+  DESAJUST_MODA == "Infraqualificació" & ANY == 2005, "Infra 2005",
+  fifelse(
+    DESAJUST_MODA == "Sobrequalificació" & ANY == 2005, "Sobre 2005",
+    fifelse(
+      DESAJUST_MODA == "Infraqualificació" & ANY == 2025, "Infra 2025",
+      "Sobre 2025"
+    )
+  )
+)]
+
+taula_final_desajust <- dcast(
+  taula_desajust,
+  OCUP1 + OCUPACIO ~ col_any,
+  value.var = "pct",
+  fill = 0
+)
+
+# assegurar columnes
+cols_necessaries <- c("Infra 2005", "Sobre 2005", "Infra 2025", "Sobre 2025")
+for (col in cols_necessaries) {
+  if (!col %in% names(taula_final_desajust)) taula_final_desajust[, (col) := 0]
+}
+
+# ordenar 9 -> 1
+taula_final_desajust[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(taula_final_desajust, OCUP1)
+taula_final_desajust[, OCUP1 := as.character(OCUP1)]
+
+# arrodonir
+taula_final_desajust[, `:=`(
+  `Infra 2005` = round(`Infra 2005`, 2),
+  `Sobre 2005` = round(`Sobre 2005`, 2),
+  `Infra 2025` = round(`Infra 2025`, 2),
+  `Sobre 2025` = round(`Sobre 2025`, 2)
+)]
+
+print(taula_final_desajust)
+View(taula_final_desajust)
+```
+
+
+````{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) FUNCIONS D'ETIQUETES
+# --------------------------------------------------
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+# ordre files i columnes
+ordre_files <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+ordre_cols <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció qualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals de suport",
+  "Professionals científics i intel·lectuals",
+  "Directius i gerents"
+)
+
+# --------------------------------------------------
+# 3) FUNCIÓ PER CREAR LA TAULA D'UN PERÍODE
+# --------------------------------------------------
+crear_taula_periodo <- function(data, any_inici, any_fi) {
+  
+  df <- data[
+    ANY >= any_inici & ANY <= any_fi &
+    !is.na(AOI) &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+    !is.na(FACTOREL),
+    .(
+      NFORMA = trimws(as.character(NFORMA)),
+      OCUP1  = trimws(as.character(OCUP1)),
+      FACTOREL
+    )
+  ]
+  
+  # etiquetes
+  df[, NFORMA_CAT := etiqueta_nforma(NFORMA)]
+  df[, OCUP_CAT := etiqueta_ocup(OCUP1)]
+  
+  # resum ponderat
+  resum <- df[
+    ,
+    .(valor = sum(FACTOREL, na.rm = TRUE)),
+    by = .(NFORMA_CAT, OCUP_CAT)
+  ]
+  
+  # percentatge dins de cada ocupació
+  totals <- resum[, .(total = sum(valor)), by = OCUP_CAT]
+  resum <- merge(resum, totals, by = "OCUP_CAT")
+  resum[, pct := 100 * valor / total]
+  
+  # taula ampla
+  taula <- dcast(
+    resum,
+    NFORMA_CAT ~ OCUP_CAT,
+    value.var = "pct",
+    fill = 0
+  )
+  
+  # assegurar ordre de files
+  taula_base <- data.table(NFORMA_CAT = ordre_files)
+  taula <- merge(taula_base, taula, by = "NFORMA_CAT", all.x = TRUE, sort = FALSE)
+  taula[is.na(taula)] <- 0
+  
+  # assegurar ordre de columnes
+  cols_existents <- names(taula)
+  cols_final <- c("NFORMA_CAT", ordre_cols[ordre_cols %in% cols_existents])
+  taula <- taula[, ..cols_final]
+  
+  # afegir columnes que faltin, si n'hi hagués cap buida
+  for (col in ordre_cols) {
+    if (!col %in% names(taula)) taula[, (col) := 0]
+  }
+  
+  # reordenar exactament
+  taula <- taula[, c("NFORMA_CAT", ordre_cols), with = FALSE]
+  
+  # arrodonir
+  cols_num <- setdiff(names(taula), "NFORMA_CAT")
+  taula[, (cols_num) := lapply(.SD, function(x) round(x, 2)), .SDcols = cols_num]
+  
+  return(taula)
+}
+
+# --------------------------------------------------
+# 4) CREAR LES 3 TAULES
+# --------------------------------------------------
+taula_2005_2025 <- crear_taula_periodo(EPA_2005_2025v2, 2005, 2025)
+taula_2005_2015 <- crear_taula_periodo(EPA_2005_2025v2, 2005, 2015)
+taula_2015_2025 <- crear_taula_periodo(EPA_2005_2025v2, 2015, 2025)
+
+# --------------------------------------------------
+# 5) VEURE LES TAULES
+# --------------------------------------------------
+print(taula_2005_2025)
+print(taula_2005_2015)
+print(taula_2015_2025)
+
+View(taula_2005_2025)
+View(taula_2005_2015)
+View(taula_2015_2025)
+
+# --------------------------------------------------
+# 6) OPCIONAL: GUARDAR-LES EN CSV
+# --------------------------------------------------
+write.csv(taula_2005_2025, "taula_2005_2025.csv", row.names = FALSE)
+write.csv(taula_2005_2015, "taula_2005_2015.csv", row.names = FALSE)
+write.csv(taula_2015_2025, "taula_2015_2025.csv", row.names = FALSE)
+````
+
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) ETIQUETES D'OCUPACIÓ
+# --------------------------------------------------
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+# --------------------------------------------------
+# 4) BASE DE TREBALL: NOMÉS OCUPATS
+# --------------------------------------------------
+base_desajust <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  trimws(as.character(AOI)) != "" &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(FACTOREL),
+  .(
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 5) MODA EDUCATIVA PER OCUPACIÓ
+# --------------------------------------------------
+moda_ocup <- base_desajust[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 6) UNIR MODA A CADA OBSERVACIÓ
+# --------------------------------------------------
+base_desajust[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_desajust <- merge(
+  base_desajust,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+# --------------------------------------------------
+# 7) CLASSIFICAR DESAJUST
+# --------------------------------------------------
+base_desajust[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+base_desajust[, OCUPACIO := etiqueta_ocup(OCUP1)]
+
+# --------------------------------------------------
+# 8) RESUM PONDERAT PER OCUPACIÓ I DESAJUST
+# --------------------------------------------------
+resum <- base_desajust[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, OCUPACIO, DESAJUST_MODA)
+]
+
+# percentatge dins de cada ocupació
+resum[, pct := 100 * valor / sum(valor), by = .(OCUP1, OCUPACIO)]
+
+# --------------------------------------------------
+# 9) TAULA AMPLA PEL GRÀFIC
+# --------------------------------------------------
+taula_grafic <- dcast(
+  resum,
+  DESAJUST_MODA ~ OCUPACIO,
+  value.var = "pct",
+  fill = 0
+)
+
+# ordre ocupacions
+ordre_cols <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció qualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals de suport",
+  "Professionals científics i intel·lectuals",
+  "Directius i gerents"
+)
+
+# assegurar files en ordre
+ordre_files <- c("Infraqualificació", "Ajust", "Sobrequalificació")
+taula_base <- data.table(DESAJUST_MODA = ordre_files)
+taula_grafic <- merge(taula_base, taula_grafic, by = "DESAJUST_MODA", all.x = TRUE, sort = FALSE)
+taula_grafic[is.na(taula_grafic)] <- 0
+
+# assegurar columnes en ordre
+for (col in ordre_cols) {
+  if (!col %in% names(taula_grafic)) taula_grafic[, (col) := 0]
+}
+taula_grafic <- taula_grafic[, c("DESAJUST_MODA", ordre_cols), with = FALSE]
+
+# matriu
+mat <- as.matrix(taula_grafic[, -1])
+
+# colors
+colors_desajust <- c("firebrick3", "gray70", "darkorange2")
+
+# --------------------------------------------------
+# 10) GRÀFIC
+# --------------------------------------------------
+jpeg("grafic_barres_apilades_desajust_per_ocupacio.jpg", width = 3200, height = 1700, res = 220)
+
+par(mar = c(11, 6, 5, 12), xpd = TRUE)
+
+bp <- barplot(
+  mat,
+  beside = FALSE,
+  col = colors_desajust,
+  border = NA,
+  ylim = c(0, 100),
+  xaxt = "n",
+  yaxt = "n",
+  ylab = "Percentatge",
+  main = "Distribució de la infraqualificació, l'ajust i la sobrequalificació per ocupació"
+)
+
+axis(1, at = bp, labels = colnames(mat), las = 2, cex.axis = 0.9)
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+abline(h = seq(0, 100, by = 10), col = "gray90")
+
+# etiquetes de percentatge dins de cada segment
+for (j in 1:ncol(mat)) {
+  acumulat <- 0
+  for (i in 1:nrow(mat)) {
+    valor <- mat[i, j]
+    if (valor > 3) {
+      text(
+        x = bp[j],
+        y = acumulat + valor / 2,
+        labels = paste0(round(valor, 1), "%"),
+        cex = 0.75
+      )
+    }
+    acumulat <- acumulat + valor
+  }
+}
+
+legend(
+  "topright",
+  inset = c(-0.28, 0),
+  legend = c("Infraqualificació", "Ajust", "Sobrequalificació"),
+  fill = colors_desajust,
+  bty = "o",
+  bg = "white",
+  cex = 0.95
+)
+
+dev.off()
+```
+
+
+````{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ETIQUETES
+# --------------------------------------------------
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+ordre_files <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+ordre_cols <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció qualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals de suport",
+  "Professionals científics i intel·lectuals",
+  "Directius i gerents"
+)
+
+colors_nforma <- c(
+  "gray85",
+  "gray70",
+  "khaki2",
+  "goldenrod2",
+  "darkseagreen3",
+  "steelblue3",
+  "navy"
+)
+
+# --------------------------------------------------
+# 3) FUNCIÓ PER CREAR LA TAULA DE PERCENTATGES
+# --------------------------------------------------
+crear_taula_periodo <- function(data, any_inici, any_fi) {
+  
+  df <- data[
+    ANY >= any_inici & ANY <= any_fi &
+    !is.na(AOI) &
+    trimws(as.character(AOI)) != "" &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &
+    !is.na(FACTOREL),
+    .(
+      NFORMA = trimws(as.character(NFORMA)),
+      OCUP1 = trimws(as.character(OCUP1)),
+      FACTOREL
+    )
+  ]
+  
+  df[, NFORMA_CAT := etiqueta_nforma(NFORMA)]
+  df[, OCUP_CAT := etiqueta_ocup(OCUP1)]
+  
+  resum <- df[
+    ,
+    .(valor = sum(FACTOREL, na.rm = TRUE)),
+    by = .(NFORMA_CAT, OCUP_CAT)
+  ]
+  
+  totals <- resum[, .(total = sum(valor)), by = OCUP_CAT]
+  resum <- merge(resum, totals, by = "OCUP_CAT")
+  resum[, pct := 100 * valor / total]
+  
+  taula <- dcast(
+    resum,
+    NFORMA_CAT ~ OCUP_CAT,
+    value.var = "pct",
+    fill = 0
+  )
+  
+  taula_base <- data.table(NFORMA_CAT = ordre_files)
+  taula <- merge(taula_base, taula, by = "NFORMA_CAT", all.x = TRUE, sort = FALSE)
+  taula[is.na(taula)] <- 0
+  
+  for (col in ordre_cols) {
+    if (!col %in% names(taula)) taula[, (col) := 0]
+  }
+  
+  taula <- taula[, c("NFORMA_CAT", ordre_cols), with = FALSE]
+  return(taula)
+}
+
+# --------------------------------------------------
+# 4) CREAR LES 3 TAULES
+# --------------------------------------------------
+taula_1 <- crear_taula_periodo(EPA_2005_2025v2, 2005, 2025)
+taula_2 <- crear_taula_periodo(EPA_2005_2025v2, 2005, 2015)
+taula_3 <- crear_taula_periodo(EPA_2005_2025v2, 2015, 2025)
+
+# ==================================================
+# GRÀFIC 1: NOMÉS 2005-2025
+# ==================================================
+jpeg("grafic_2005_2025_sol.jpg", width = 2600, height = 1600, res = 220)
+
+layout(matrix(c(1, 2), nrow = 1), widths = c(5.5, 2))
+
+par(mar = c(11, 6, 5, 2))
+mat1 <- as.matrix(taula_1[, -1])
+
+bp1 <- barplot(
+  mat1,
+  beside = FALSE,
+  col = colors_nforma,
+  border = NA,
+  ylim = c(0, 100),
+  xaxt = "n",
+  yaxt = "n",
+  ylab = "Percentatge",
+  main = "Distribució del nivell educatiu per grup ocupacional (2005-2025)"
+)
+
+axis(1, at = bp1, labels = colnames(mat1), las = 2, cex.axis = 0.9)
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+abline(h = seq(0, 100, by = 10), col = "gray90")
+
+par(mar = c(11, 1, 5, 1))
+plot.new()
+legend(
+  "center",
+  legend = rev(taula_1$NFORMA_CAT),
+  fill = rev(colors_nforma),
+  bty = "o",
+  bg = "white",
+  cex = 0.95,
+  title = "Nivell educatiu"
+)
+
+dev.off()
+
+# ==================================================
+# GRÀFIC 2: 2005-2015 I 2015-2025 JUNTS
+# ==================================================
+jpeg("grafic_subperiods_junts.jpg", width = 3800, height = 1700, res = 220)
+
+layout(matrix(c(1, 2, 3), nrow = 1), widths = c(4.5, 4.5, 2.2))
+
+# ---- gràfic 2005-2015 ----
+par(mar = c(11, 6, 5, 1))
+mat2 <- as.matrix(taula_2[, -1])
+
+bp2 <- barplot(
+  mat2,
+  beside = FALSE,
+  col = colors_nforma,
+  border = NA,
+  ylim = c(0, 100),
+  xaxt = "n",
+  yaxt = "n",
+  ylab = "Percentatge",
+  main = "2005-2015"
+)
+
+axis(1, at = bp2, labels = colnames(mat2), las = 2, cex.axis = 0.85)
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+abline(h = seq(0, 100, by = 10), col = "gray90")
+
+# ---- gràfic 2015-2025 ----
+par(mar = c(11, 6, 5, 1))
+mat3 <- as.matrix(taula_3[, -1])
+
+bp3 <- barplot(
+  mat3,
+  beside = FALSE,
+  col = colors_nforma,
+  border = NA,
+  ylim = c(0, 100),
+  xaxt = "n",
+  yaxt = "n",
+  ylab = "Percentatge",
+  main = "2015-2025"
+)
+
+axis(1, at = bp3, labels = colnames(mat3), las = 2, cex.axis = 0.85)
+axis(2, at = seq(0, 100, by = 10), labels = paste0(seq(0, 100, by = 10), "%"))
+abline(h = seq(0, 100, by = 10), col = "gray90")
+
+# ---- llegenda ----
+par(mar = c(11, 1, 5, 1))
+plot.new()
+legend(
+  "center",
+  legend = rev(taula_1$NFORMA_CAT),
+  fill = rev(colors_nforma),
+  bty = "o",
+  bg = "white",
+  cex = 0.95,
+  title = "Nivell educatiu"
+)
+
+mtext(
+  "Comparació de la distribució del nivell educatiu per grup ocupacional",
+  outer = TRUE,
+  cex = 1.35,
+  line = -2
+)
+
+dev.off()
+````
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# si no existeix ANY, el creem a partir de CICLO
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# ordre educatiu de menor a major
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# etiquetes nivell educatiu
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+# etiquetes ocupació
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+# base de treball
+base_sexe <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(SEXO1) & trimws(as.character(SEXO1)) %in% c("1", "6") &
+  !is.na(FACTOREL),
+  .(
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    SEXO1 = trimws(as.character(SEXO1)),
+    FACTOREL
+  )
+]
+
+# resum ponderat per ocupació, sexe i nivell educatiu
+moda_sexe_ocup <- base_sexe[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, SEXO1, NFORMA)
+]
+
+# ordre educatiu
+moda_sexe_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+# si hi ha empat, es queda amb la primera segons l'ordre educatiu
+moda_sexe_ocup_final <- moda_sexe_ocup[
+  order(OCUP1, SEXO1, -pes, NFORMA)
+][
+  , .SD[1], by = .(OCUP1, SEXO1)
+]
+
+# etiquetes
+moda_sexe_ocup_final[, NFORMA_DESC := etiqueta_nforma(as.character(NFORMA))]
+moda_sexe_ocup_final[, OCUPACIO := etiqueta_ocup(OCUP1)]
+moda_sexe_ocup_final[, SEXE := fifelse(SEXO1 == "1", "Homes", "Dones")]
+
+# passar a format ampli
+taula_moda_sexe <- dcast(
+  moda_sexe_ocup_final[, .(OCUP1, OCUPACIO, SEXE, NFORMA_DESC)],
+  OCUP1 + OCUPACIO ~ SEXE,
+  value.var = "NFORMA_DESC"
+)
+
+# assegurar ordre 9 -> 1
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+taula_moda_sexe[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(taula_moda_sexe, OCUP1)
+taula_moda_sexe[, OCUP1 := as.character(OCUP1)]
+
+print(taula_moda_sexe)
+View(taula_moda_sexe)
+```
+
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# si no existeix ANY, el creem a partir de CICLO
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# ordre educatiu de menor a major
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# etiquetes nivell educatiu
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+# etiquetes ocupació
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+# base només per 2005 i 2025
+base_sexe_any <- EPA_2005_2025v2[
+  ANY %in% c(2005L, 2025L) &
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(SEXO1) & trimws(as.character(SEXO1)) %in% c("1", "6") &
+  !is.na(FACTOREL),
+  .(
+    ANY,
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    SEXO1 = trimws(as.character(SEXO1)),
+    FACTOREL
+  )
+]
+
+# resum ponderat per any, ocupació, sexe i nivell educatiu
+moda_sexe_any_ocup <- base_sexe_any[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, OCUP1, SEXO1, NFORMA)
+]
+
+# ordre educatiu
+moda_sexe_any_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+# si hi ha empat, es queda amb la primera segons l'ordre educatiu
+moda_sexe_any_ocup_final <- moda_sexe_any_ocup[
+  order(ANY, OCUP1, SEXO1, -pes, NFORMA)
+][
+  , .SD[1], by = .(ANY, OCUP1, SEXO1)
+]
+
+# etiquetes
+moda_sexe_any_ocup_final[, NFORMA_DESC := etiqueta_nforma(as.character(NFORMA))]
+moda_sexe_any_ocup_final[, OCUPACIO := etiqueta_ocup(OCUP1)]
+moda_sexe_any_ocup_final[, SEXE := fifelse(SEXO1 == "1", "Homes", "Dones")]
+
+# nom de columna final
+moda_sexe_any_ocup_final[, COL := fifelse(
+  ANY == 2005 & SEXE == "Homes", "Homes 2005",
+  fifelse(
+    ANY == 2005 & SEXE == "Dones", "Dones 2005",
+    fifelse(
+      ANY == 2025 & SEXE == "Homes", "Homes 2025",
+      "Dones 2025"
+    )
+  )
+)]
+
+# taula ampla
+taula_moda_sexe_any <- dcast(
+  moda_sexe_any_ocup_final[, .(OCUP1, OCUPACIO, COL, NFORMA_DESC)],
+  OCUP1 + OCUPACIO ~ COL,
+  value.var = "NFORMA_DESC"
+)
+
+# assegurar columnes
+cols_final <- c("Homes 2005", "Dones 2005", "Homes 2025", "Dones 2025")
+for (col in cols_final) {
+  if (!col %in% names(taula_moda_sexe_any)) taula_moda_sexe_any[, (col) := NA_character_]
+}
+
+# ordenar 9 -> 1
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+taula_moda_sexe_any[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(taula_moda_sexe_any, OCUP1)
+taula_moda_sexe_any[, OCUP1 := as.character(OCUP1)]
+
+# reordenar columnes
+taula_moda_sexe_any <- taula_moda_sexe_any[, c("OCUP1", "OCUPACIO", cols_final), with = FALSE]
+
+print(taula_moda_sexe_any)
+View(taula_moda_sexe_any)
+```
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU I ETIQUETES
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+# --------------------------------------------------
+# 3) BASE DE TREBALL 2005-2025
+# --------------------------------------------------
+base_desajust_sexe <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(SEXO1) & trimws(as.character(SEXO1)) %in% c("1", "6") &
+  !is.na(FACTOREL),
+  .(
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    SEXO1 = trimws(as.character(SEXO1)),
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 4) MODA EDUCATIVA GLOBAL PER OCUPACIÓ (NO SEPARADA PER SEXE)
+# --------------------------------------------------
+moda_ocup <- base_desajust_sexe[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+# si hi ha empat, es queda amb la primera segons l'ordre educatiu
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 5) AFEGIR MODA A CADA OBSERVACIÓ
+# --------------------------------------------------
+base_desajust_sexe[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_desajust_sexe <- merge(
+  base_desajust_sexe,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+# --------------------------------------------------
+# 6) CLASSIFICAR DESAJUST
+# --------------------------------------------------
+base_desajust_sexe[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+base_desajust_sexe[, SEXE := fifelse(SEXO1 == "1", "Homes", "Dones")]
+base_desajust_sexe[, OCUPACIO := etiqueta_ocup(OCUP1)]
+
+# --------------------------------------------------
+# 7) RESUM PONDERAT PER OCUPACIÓ, SEXE I DESAJUST
+# --------------------------------------------------
+resum_sexe <- base_desajust_sexe[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, OCUPACIO, SEXE, DESAJUST_MODA)
+]
+
+# percentatges dins de cada ocupació i sexe
+resum_sexe[, pct := 100 * pes / sum(pes), by = .(OCUP1, OCUPACIO, SEXE)]
+
+# ens quedem amb infra i sobre
+resum_sexe <- resum_sexe[DESAJUST_MODA %in% c("Infraqualificació", "Sobrequalificació")]
+
+# nom de columna final
+resum_sexe[, COL := fifelse(
+  SEXE == "Homes" & DESAJUST_MODA == "Infraqualificació", "Infra Homes",
+  fifelse(
+    SEXE == "Homes" & DESAJUST_MODA == "Sobrequalificació", "Sobre Homes",
+    fifelse(
+      SEXE == "Dones" & DESAJUST_MODA == "Infraqualificació", "Infra Dones",
+      "Sobre Dones"
+    )
+  )
+)]
+
+# --------------------------------------------------
+# 8) TAULA FINAL AMPLA
+# --------------------------------------------------
+taula_desajust_sexe <- dcast(
+  resum_sexe,
+  OCUP1 + OCUPACIO ~ COL,
+  value.var = "pct",
+  fill = 0
+)
+
+# assegurar columnes
+cols_final <- c("Infra Homes", "Sobre Homes", "Infra Dones", "Sobre Dones")
+for (col in cols_final) {
+  if (!col %in% names(taula_desajust_sexe)) taula_desajust_sexe[, (col) := 0]
+}
+
+# ordenar de 9 a 1
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+taula_desajust_sexe[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(taula_desajust_sexe, OCUP1)
+taula_desajust_sexe[, OCUP1 := as.character(OCUP1)]
+
+# reordenar columnes
+taula_desajust_sexe <- taula_desajust_sexe[, c("OCUP1", "OCUPACIO", cols_final), with = FALSE]
+
+# arrodonir
+taula_desajust_sexe[, `:=`(
+  `Infra Homes` = round(`Infra Homes`, 2),
+  `Sobre Homes` = round(`Sobre Homes`, 2),
+  `Infra Dones` = round(`Infra Dones`, 2),
+  `Sobre Dones` = round(`Sobre Dones`, 2)
+)]
+
+print(taula_desajust_sexe)
+View(taula_desajust_sexe)
+```
+````{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# si no existeix ANY, el creem a partir de CICLO
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# detectar variable d'edat
+edat_var <- intersect(names(EPA_2005_2025v2), c("EDAT1", "EDAD1"))
+if (length(edat_var) == 0) stop("No trobo EDAT1/EDAD1")
+edat_var <- edat_var[1]
+
+# ordre educatiu
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# etiquetes
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+# base
+base_edat <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &
+  !is.na(FACTOREL),
+  .(
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL,
+    EDAT = suppressWarnings(as.numeric(as.character(get(edat_var))))
+  )
+]
+
+base_edat <- base_edat[!is.na(EDAT)]
+
+# grups d'edat
+base_edat[, GRUP_EDAT := fcase(
+  EDAT >= 16 & EDAT <= 30, "16-30",
+  EDAT >= 31 & EDAT <= 40, "31-40",
+  EDAT >= 41 & EDAT <= 55, "41-55",
+  EDAT >= 56, "56 o més",
+  default = NA_character_
+)]
+
+base_edat <- base_edat[!is.na(GRUP_EDAT)]
+
+# resum ponderat per ocupació, grup d'edat i nivell educatiu
+moda_edat_ocup <- base_edat[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, GRUP_EDAT, NFORMA)
+]
+
+moda_edat_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+# moda
+moda_edat_ocup_final <- moda_edat_ocup[
+  order(OCUP1, GRUP_EDAT, -pes, NFORMA)
+][
+  , .SD[1], by = .(OCUP1, GRUP_EDAT)
+]
+
+moda_edat_ocup_final[, NFORMA_DESC := etiqueta_nforma(as.character(NFORMA))]
+moda_edat_ocup_final[, OCUPACIO := etiqueta_ocup(OCUP1)]
+
+# taula ampla
+taula_moda_edat <- dcast(
+  moda_edat_ocup_final[, .(OCUP1, OCUPACIO, GRUP_EDAT, NFORMA_DESC)],
+  OCUP1 + OCUPACIO ~ GRUP_EDAT,
+  value.var = "NFORMA_DESC"
+)
+
+# ordre ocupacions 9 -> 1
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+taula_moda_edat[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(taula_moda_edat, OCUP1)
+taula_moda_edat[, OCUP1 := as.character(OCUP1)]
+
+print(taula_moda_edat)
+View(taula_moda_edat)
+````
+
+````{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# si no existeix ANY, el creem a partir de CICLO
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# detectar variable d'edat
+edat_var <- intersect(names(EPA_2005_2025v2), c("EDAT1", "EDAD1"))
+if (length(edat_var) == 0) stop("No trobo EDAT1/EDAD1")
+edat_var <- edat_var[1]
+
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "9", "Ocupacions elementals",
+    x == "8", "Operadors i muntadors",
+    x == "7", "Indústria i construcció qualificades",
+    x == "6", "Sector primari qualificat",
+    x == "5", "Serveis i vendes",
+    x == "4", "Personal administratiu",
+    x == "3", "Tècnics i professionals de suport",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "1", "Directius i gerents",
+    default = x
+  )
+}
+
+# base
+base_desajust_edat <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &
+  !is.na(FACTOREL),
+  .(
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL,
+    EDAT = suppressWarnings(as.numeric(as.character(get(edat_var))))
+  )
+]
+
+base_desajust_edat <- base_desajust_edat[!is.na(EDAT)]
+
+# grups d'edat
+base_desajust_edat[, GRUP_EDAT := fcase(
+  EDAT >= 16 & EDAT <= 30, "16-30",
+  EDAT >= 31 & EDAT <= 40, "31-40",
+  EDAT >= 41 & EDAT <= 55, "41-55",
+  EDAT >= 56, "56 o més",
+  default = NA_character_
+)]
+
+base_desajust_edat <- base_desajust_edat[!is.na(GRUP_EDAT)]
+
+# moda global per ocupació (comuna per a tots els grups d'edat)
+moda_ocup <- base_desajust_edat[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# unir la moda a cada observació
+base_desajust_edat[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_desajust_edat <- merge(
+  base_desajust_edat,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+# classificar desajust
+base_desajust_edat[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+base_desajust_edat[, OCUPACIO := etiqueta_ocup(OCUP1)]
+
+# resum ponderat per ocupació, grup d'edat i desajust
+resum_edat <- base_desajust_edat[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, OCUPACIO, GRUP_EDAT, DESAJUST_MODA)
+]
+
+# percentatges dins de cada ocupació i grup d'edat
+resum_edat[, pct := 100 * pes / sum(pes), by = .(OCUP1, OCUPACIO, GRUP_EDAT)]
+
+# només infra i sobre
+resum_edat <- resum_edat[DESAJUST_MODA %in% c("Infraqualificació", "Sobrequalificació")]
+
+# nom de columna final
+resum_edat[, COL := fifelse(
+  GRUP_EDAT == "16-30" & DESAJUST_MODA == "Infraqualificació", "Infra 16-30",
+  fifelse(
+    GRUP_EDAT == "16-30" & DESAJUST_MODA == "Sobrequalificació", "Sobre 16-30",
+    fifelse(
+      GRUP_EDAT == "31-40" & DESAJUST_MODA == "Infraqualificació", "Infra 31-40",
+      fifelse(
+        GRUP_EDAT == "31-40" & DESAJUST_MODA == "Sobrequalificació", "Sobre 31-40",
+        fifelse(
+          GRUP_EDAT == "41-55" & DESAJUST_MODA == "Infraqualificació", "Infra 41-55",
+          fifelse(
+            GRUP_EDAT == "41-55" & DESAJUST_MODA == "Sobrequalificació", "Sobre 41-55",
+            fifelse(
+              GRUP_EDAT == "56 o més" & DESAJUST_MODA == "Infraqualificació", "Infra 56+",
+              "Sobre 56+"
+            )
+          )
+        )
+      )
+    )
+  )
+)]
+
+# taula ampla
+taula_desajust_edat <- dcast(
+  resum_edat,
+  OCUP1 + OCUPACIO ~ COL,
+  value.var = "pct",
+  fill = 0
+)
+
+# assegurar ordre de columnes
+cols_final <- c(
+  "Infra 16-30", "Sobre 16-30",
+  "Infra 31-40", "Sobre 31-40",
+  "Infra 41-55", "Sobre 41-55",
+  "Infra 56+", "Sobre 56+"
+)
+
+for (col in cols_final) {
+  if (!col %in% names(taula_desajust_edat)) taula_desajust_edat[, (col) := 0]
+}
+
+# ordre ocupacions 9 -> 1
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+taula_desajust_edat[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(taula_desajust_edat, OCUP1)
+taula_desajust_edat[, OCUP1 := as.character(OCUP1)]
+
+# reordenar i arrodonir
+taula_desajust_edat <- taula_desajust_edat[, c("OCUP1", "OCUPACIO", cols_final), with = FALSE]
+taula_desajust_edat[, (cols_final) := lapply(.SD, function(x) round(x, 2)), .SDcols = cols_final]
+
+print(taula_desajust_edat)
+View(taula_desajust_edat)
+````
+
+````{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# si no existeix ANY, el creem a partir de CICLO
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# detectar variable d'edat
+edat_var <- intersect(names(EPA_2005_2025v2), c("EDAT1", "EDAD1"))
+if (length(edat_var) == 0) stop("No trobo EDAT1/EDAD1")
+edat_var <- edat_var[1]
+
+# funció etiquetes estudis
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+# base de treball
+base_edat_estudis <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(FACTOREL),
+  .(
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL,
+    EDAT = suppressWarnings(as.numeric(as.character(get(edat_var))))
+  )
+]
+
+base_edat_estudis <- base_edat_estudis[!is.na(EDAT)]
+
+# grups d'edat
+base_edat_estudis[, GRUP_EDAT := fcase(
+  EDAT >= 16 & EDAT <= 30, "16-30",
+  EDAT >= 31 & EDAT <= 40, "31-40",
+  EDAT >= 41 & EDAT <= 55, "41-55",
+  EDAT >= 56, "56 o més",
+  default = NA_character_
+)]
+
+base_edat_estudis <- base_edat_estudis[!is.na(GRUP_EDAT)]
+
+# etiquetes estudis
+base_edat_estudis[, NFORMA_CAT := etiqueta_nforma(NFORMA)]
+
+# resum ponderat per grup d'edat i nivell educatiu
+resum <- base_edat_estudis[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(GRUP_EDAT, NFORMA_CAT)
+]
+
+# percentatge DINS de cada grup d'edat
+resum[, pct := 100 * valor / sum(valor), by = GRUP_EDAT]
+
+# taula ampla
+taula_pct_edat <- dcast(
+  resum,
+  GRUP_EDAT ~ NFORMA_CAT,
+  value.var = "pct",
+  fill = 0
+)
+
+# ordenar files
+ordre_edat <- c("16-30", "31-40", "41-55", "56 o més")
+taula_pct_edat[, GRUP_EDAT := factor(GRUP_EDAT, levels = ordre_edat, ordered = TRUE)]
+setorder(taula_pct_edat, GRUP_EDAT)
+taula_pct_edat[, GRUP_EDAT := as.character(GRUP_EDAT)]
+
+# ordenar columnes
+ordre_cols <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+for (col in ordre_cols) {
+  if (!col %in% names(taula_pct_edat)) taula_pct_edat[, (col) := 0]
+}
+
+taula_pct_edat <- taula_pct_edat[, c("GRUP_EDAT", ordre_cols), with = FALSE]
+
+# arrodonir
+cols_num <- setdiff(names(taula_pct_edat), "GRUP_EDAT")
+taula_pct_edat[, (cols_num) := lapply(.SD, function(x) round(x, 2)), .SDcols = cols_num]
+
+print(taula_pct_edat)
+View(taula_pct_edat)
+
+# comprovació: cada fila ha de sumar 100
+taula_pct_edat[, Total := round(rowSums(.SD), 2), .SDcols = cols_num]
+print(taula_pct_edat[, .(GRUP_EDAT, Total)])
+````
+
+````{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# si no existeix ANY, el creem a partir de CICLO
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# funció etiquetes estudis
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+# base: anys 2005 i 2025
+base_estudis_any <- EPA_2005_2025v2[
+  ANY %in% c(2005L, 2025L) &
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(FACTOREL),
+  .(
+    ANY,
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+# etiquetes
+base_estudis_any[, NFORMA_CAT := etiqueta_nforma(NFORMA)]
+
+# resum ponderat per any i nivell educatiu
+resum <- base_estudis_any[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, NFORMA_CAT)
+]
+
+# percentatge dins de cada any
+resum[, pct := 100 * valor / sum(valor), by = ANY]
+
+# taula ampla
+taula_estudis_2005_2025 <- dcast(
+  resum,
+  NFORMA_CAT ~ ANY,
+  value.var = "pct",
+  fill = 0
+)
+
+# ordre de files
+ordre_files <- c(
+  "Analfabetisme",
+  "Primària incompleta",
+  "Primària",
+  "Secundària 1a etapa",
+  "Secundària general",
+  "Secundària professional",
+  "Educació superior"
+)
+
+taula_base <- data.table(NFORMA_CAT = ordre_files)
+taula_estudis_2005_2025 <- merge(
+  taula_base,
+  taula_estudis_2005_2025,
+  by = "NFORMA_CAT",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+taula_estudis_2005_2025[is.na(taula_estudis_2005_2025)] <- 0
+
+# renombrar columnes
+setnames(taula_estudis_2005_2025, c("2005", "2025"), c("Percentatge 2005", "Percentatge 2025"))
+
+# arrodonir
+taula_estudis_2005_2025[, `:=`(
+  `Percentatge 2005` = round(`Percentatge 2005`, 2),
+  `Percentatge 2025` = round(`Percentatge 2025`, 2)
+)]
+
+print(taula_estudis_2005_2025)
+View(taula_estudis_2005_2025)
+
+# comprovació: cada columna ha de sumar 100
+cat("Suma 2005 =", sum(taula_estudis_2005_2025$`Percentatge 2005`), "\n")
+cat("Suma 2025 =", sum(taula_estudis_2005_2025$`Percentatge 2025`), "\n")
+````
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTE ANY, EL CREAMOS A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2) && "CICLO" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDEN EDUCATIVO
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) ETIQUETAS
+# --------------------------------------------------
+etiqueta_nforma <- function(x) {
+  fcase(
+    x == "AN", "Analfabetisme",
+    x == "P1", "Primària incompleta",
+    x == "P2", "Primària",
+    x == "S1", "Secundària 1a etapa",
+    x == "SG", "Secundària general",
+    x == "SP", "Secundària professional",
+    x == "SU", "Educació superior",
+    default = x
+  )
+}
+
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "1", "Directius i gerents",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "3", "Tècnics i professionals de suport",
+    x == "4", "Personal administratiu",
+    x == "5", "Serveis i vendes",
+    x == "6", "Sector primari qualificat",
+    x == "7", "Indústria i construcció qualificades",
+    x == "8", "Operadors i muntadors",
+    x == "9", "Ocupacions elementals",
+    default = x
+  )
+}
+
+etiqueta_ccaa <- function(x) {
+  fcase(
+    x == "01", "Andalusia",
+    x == "02", "Aragó",
+    x == "03", "Astúries",
+    x == "04", "Illes Balears",
+    x == "05", "Canàries",
+    x == "06", "Cantàbria",
+    x == "07", "Castella i Lleó",
+    x == "08", "Castella-La Manxa",
+    x == "09", "Catalunya",
+    x == "10", "Comunitat Valenciana",
+    x == "11", "Extremadura",
+    x == "12", "Galícia",
+    x == "13", "Madrid",
+    x == "14", "Múrcia",
+    x == "15", "Navarra",
+    x == "16", "País Basc",
+    x == "17", "La Rioja",
+    x == "51", "Ceuta",
+    x == "52", "Melilla",
+    default = x
+  )
+}
+
+# --------------------------------------------------
+# 4) BASE DE TRABAJO
+# --------------------------------------------------
+base_ccaa_ocup <- EPA_2005_2025v2[
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # solo ocupados
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excluir militares
+  !is.na(CCAA) & trimws(as.character(CCAA)) != "" &
+  !is.na(FACTOREL),
+  .(
+    CCAA = sprintf("%02d", as.integer(CCAA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 5) RESUMEN PONDERADO POR CCAA, OCUPACIÓN Y NIVEL EDUCATIVO
+# --------------------------------------------------
+moda_ccaa_ocup <- base_ccaa_ocup[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(CCAA, OCUP1, NFORMA)
+]
+
+moda_ccaa_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+# --------------------------------------------------
+# 6) MODA POR CCAA Y OCUPACIÓN
+#    SI HAY EMPATE, SE QUEDA CON LA PRIMERA SEGÚN EL ORDEN EDUCATIVO
+# --------------------------------------------------
+moda_ccaa_ocup_final <- moda_ccaa_ocup[
+  order(CCAA, OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = .(CCAA, OCUP1)
+]
+
+# --------------------------------------------------
+# 7) ETIQUETAS FINALES
+# --------------------------------------------------
+moda_ccaa_ocup_final[, COMUNIDAD := etiqueta_ccaa(CCAA)]
+moda_ccaa_ocup_final[, OCUPACION := etiqueta_ocup(OCUP1)]
+moda_ccaa_ocup_final[, MODA_NFORMA := as.character(NFORMA)]
+moda_ccaa_ocup_final[, MODA_NFORMA_DESC := etiqueta_nforma(MODA_NFORMA)]
+
+# ordenar ocupaciones de 9 a 1
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+moda_ccaa_ocup_final[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(moda_ccaa_ocup_final, CCAA, OCUP1)
+
+# --------------------------------------------------
+# 8) TABLA FINAL
+# --------------------------------------------------
+resultat_moda_ccaa_ocup <- moda_ccaa_ocup_final[, .(
+  CCAA,
+  COMUNIDAD,
+  OCUP1 = as.character(OCUP1),
+  OCUPACION,
+  MODA_NFORMA,
+  MODA_NFORMA_DESC,
+  PES_MODA = round(pes, 2)
+)]
+
+print(resultat_moda_ccaa_ocup)
+View(resultat_moda_ccaa_ocup)
+
+# opcional: guardar en csv
+write.csv(resultat_moda_ccaa_ocup, "moda_ccaa_ocupacio.csv", row.names = FALSE)
+```
+
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2) && "CICLO" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) ETIQUETES
+# --------------------------------------------------
+etiqueta_ocup <- function(x) {
+  fcase(
+    x == "1", "Directius i gerents",
+    x == "2", "Professionals científics i intel·lectuals",
+    x == "3", "Tècnics i professionals de suport",
+    x == "4", "Personal administratiu",
+    x == "5", "Serveis i vendes",
+    x == "6", "Sector primari qualificat",
+    x == "7", "Indústria i construcció qualificades",
+    x == "8", "Operadors i muntadors",
+    x == "9", "Ocupacions elementals",
+    default = x
+  )
+}
+
+etiqueta_ccaa <- function(x) {
+  fcase(
+    x == "01", "Andalusia",
+    x == "02", "Aragó",
+    x == "03", "Astúries",
+    x == "04", "Illes Balears",
+    x == "05", "Canàries",
+    x == "06", "Cantàbria",
+    x == "07", "Castella i Lleó",
+    x == "08", "Castella-La Manxa",
+    x == "09", "Catalunya",
+    x == "10", "Comunitat Valenciana",
+    x == "11", "Extremadura",
+    x == "12", "Galícia",
+    x == "13", "Madrid",
+    x == "14", "Múrcia",
+    x == "15", "Navarra",
+    x == "16", "País Basc",
+    x == "17", "La Rioja",
+    x == "51", "Ceuta",
+    x == "52", "Melilla",
+    default = x
+  )
+}
+
+# --------------------------------------------------
+# 4) BASE DE TREBALL
+# --------------------------------------------------
+base_ccaa_desajust <- EPA_2005_2025v2[
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(CCAA) & trimws(as.character(CCAA)) != "" &
+  !is.na(FACTOREL),
+  .(
+    CCAA = sprintf("%02d", as.integer(CCAA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 5) MODA EDUCATIVA PER CCAA I OCUPACIÓ
+# --------------------------------------------------
+moda_ccaa_ocup <- base_ccaa_desajust[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(CCAA, OCUP1, NFORMA)
+]
+
+moda_ccaa_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ccaa_ocup_final <- moda_ccaa_ocup[
+  order(CCAA, OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = .(CCAA, OCUP1)
+]
+
+setnames(moda_ccaa_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 6) AFEGIR LA MODA A CADA OBSERVACIÓ
+# --------------------------------------------------
+base_ccaa_desajust[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_ccaa_desajust <- merge(
+  base_ccaa_desajust,
+  moda_ccaa_ocup_final[, .(CCAA, OCUP1, NFORMA_MODA)],
+  by = c("CCAA", "OCUP1"),
+  all.x = TRUE
+)
+
+# --------------------------------------------------
+# 7) CLASSIFICAR DESAJUST
+# --------------------------------------------------
+base_ccaa_desajust[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificat",
+  NFORMA == NFORMA_MODA, "Ajustat",
+  NFORMA > NFORMA_MODA, "Sobrequalificat"
+)]
+
+base_ccaa_desajust[, COMUNIDAD := etiqueta_ccaa(CCAA)]
+base_ccaa_desajust[, OCUPACION := etiqueta_ocup(OCUP1)]
+
+# --------------------------------------------------
+# 8) RESUM PONDERAT PER CCAA, OCUPACIÓ I DESAJUST
+# --------------------------------------------------
+resum_ccaa_desajust <- base_ccaa_desajust[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(CCAA, COMUNIDAD, OCUP1, OCUPACION, DESAJUST_MODA)
+]
+
+resum_ccaa_desajust[, pct := 100 * pes / sum(pes), by = .(CCAA, COMUNIDAD, OCUP1, OCUPACION)]
+
+# --------------------------------------------------
+# 9) TAULA FINAL AMPLA
+# --------------------------------------------------
+taula_ccaa_desajust <- dcast(
+  resum_ccaa_desajust,
+  CCAA + COMUNIDAD + OCUP1 + OCUPACION ~ DESAJUST_MODA,
+  value.var = "pct",
+  fill = 0
+)
+
+# assegurar columnes
+for (col in c("Infraqualificat", "Ajustat", "Sobrequalificat")) {
+  if (!col %in% names(taula_ccaa_desajust)) taula_ccaa_desajust[, (col) := 0]
+}
+
+# ordenar ocupacions de 9 a 1 dins de cada CCAA
+ordre_ocup <- c("9", "8", "7", "6", "5", "4", "3", "2", "1")
+taula_ccaa_desajust[, OCUP1 := factor(OCUP1, levels = ordre_ocup, ordered = TRUE)]
+setorder(taula_ccaa_desajust, CCAA, OCUP1)
+taula_ccaa_desajust[, OCUP1 := as.character(OCUP1)]
+
+# arrodonir
+taula_ccaa_desajust[, `:=`(
+  Infraqualificat = round(Infraqualificat, 2),
+  Ajustat = round(Ajustat, 2),
+  Sobrequalificat = round(Sobrequalificat, 2)
+)]
+
+print(taula_ccaa_desajust)
+View(taula_ccaa_desajust)
+
+# opcional: guardar
+write.csv(taula_ccaa_desajust, "desajust_per_ccaa_i_ocupacio.csv", row.names = FALSE)
+```
+
+```{r}
+library(data.table)
+
+setDT(taula_ccaa_desajust)
+
+# ordre de les ocupacions de menys a més qualificació
+ordre_ocup_nom <- c(
+  "Ocupacions elementals",
+  "Operadors i muntadors",
+  "Indústria i construcció qualificades",
+  "Sector primari qualificat",
+  "Serveis i vendes",
+  "Personal administratiu",
+  "Tècnics i professionals de suport",
+  "Professionals científics i intel·lectuals",
+  "Directius i gerents"
+)
+
+# ordre CCAA
+ordre_ccaa <- c(
+  "Andalusia", "Aragó", "Astúries", "Illes Balears", "Canàries",
+  "Cantàbria", "Castella i Lleó", "Castella-La Manxa", "Catalunya",
+  "Comunitat Valenciana", "Extremadura", "Galícia", "Madrid",
+  "Múrcia", "Navarra", "País Basc", "La Rioja", "Ceuta", "Melilla"
+)
+
+# assegurar ordre
+taula_ccaa_desajust[, COMUNIDAD := factor(COMUNIDAD, levels = ordre_ccaa)]
+taula_ccaa_desajust[, OCUPACION := factor(OCUPACION, levels = ordre_ocup_nom)]
+
+# taula infra
+taula_infra <- dcast(
+  taula_ccaa_desajust,
+  COMUNIDAD ~ OCUPACION,
+  value.var = "Infraqualificat",
+  fill = 0
+)
+
+# taula sobre
+taula_sobre <- dcast(
+  taula_ccaa_desajust,
+  COMUNIDAD ~ OCUPACION,
+  value.var = "Sobrequalificat",
+  fill = 0
+)
+
+# convertir a matriu
+mat_infra <- as.matrix(taula_infra[, -1])
+mat_sobre <- as.matrix(taula_sobre[, -1])
+
+rownames(mat_infra) <- taula_infra$COMUNIDAD
+rownames(mat_sobre) <- taula_sobre$COMUNIDAD
+
+# paleta de colors
+pal <- colorRampPalette(c("white", "mistyrose", "indianred3", "firebrick4"))(100)
+
+# límit comú per comparar els dos gràfics
+lim_max <- max(c(mat_infra, mat_sobre), na.rm = TRUE)
+
+jpeg("heatmap_desajust_ccaa_ocupacio.jpg", width = 3200, height = 1800, res = 220)
+
+layout(matrix(c(1, 2), nrow = 1))
+par(mar = c(10, 14, 5, 2))
+
+# -------------------------
+# GRÀFIC 1: INFRAQUALIFICACIÓ
+# -------------------------
+image(
+  x = 1:ncol(mat_infra),
+  y = 1:nrow(mat_infra),
+  z = t(mat_infra[nrow(mat_infra):1, ]),
+  col = pal,
+  zlim = c(0, lim_max),
+  axes = FALSE,
+  xlab = "",
+  ylab = "",
+  main = "Infraqualificació per comunitat autònoma i ocupació"
+)
+
+axis(1, at = 1:ncol(mat_infra), labels = colnames(mat_infra), las = 2, cex.axis = 0.85)
+axis(2, at = 1:nrow(mat_infra), labels = rev(rownames(mat_infra)), las = 2, cex.axis = 0.85)
+
+abline(v = seq(0.5, ncol(mat_infra) + 0.5, by = 1), col = "gray85")
+abline(h = seq(0.5, nrow(mat_infra) + 0.5, by = 1), col = "gray85")
+
+# posar percentatges dins les cel·les
+for(i in 1:nrow(mat_infra)){
+  for(j in 1:ncol(mat_infra)){
+    valor <- mat_infra[i, j]
+    text(
+      x = j,
+      y = nrow(mat_infra) - i + 1,
+      labels = round(valor, 1),
+      cex = 0.65
+    )
+  }
+}
+
+# -------------------------
+# GRÀFIC 2: SOBREQUALIFICACIÓ
+# -------------------------
+par(mar = c(10, 14, 5, 2))
+
+image(
+  x = 1:ncol(mat_sobre),
+  y = 1:nrow(mat_sobre),
+  z = t(mat_sobre[nrow(mat_sobre):1, ]),
+  col = pal,
+  zlim = c(0, lim_max),
+  axes = FALSE,
+  xlab = "",
+  ylab = "",
+  main = "Sobrequalificació per comunitat autònoma i ocupació"
+)
+
+axis(1, at = 1:ncol(mat_sobre), labels = colnames(mat_sobre), las = 2, cex.axis = 0.85)
+axis(2, at = 1:nrow(mat_sobre), labels = rev(rownames(mat_sobre)), las = 2, cex.axis = 0.85)
+
+abline(v = seq(0.5, ncol(mat_sobre) + 0.5, by = 1), col = "gray85")
+abline(h = seq(0.5, nrow(mat_sobre) + 0.5, by = 1), col = "gray85")
+
+for(i in 1:nrow(mat_sobre)){
+  for(j in 1:ncol(mat_sobre)){
+    valor <- mat_sobre[i, j]
+    text(
+      x = j,
+      y = nrow(mat_sobre) - i + 1,
+      labels = round(valor, 1),
+      cex = 0.65
+    )
+  }
+}
+
+dev.off()
+```
+```{r}
+library(data.table)
+
+setDT(taula_ccaa_desajust)
+
+# assegurar que OCUP1 sigui text
+taula_ccaa_desajust[, OCUP1 := as.character(OCUP1)]
+
+# --------------------------------------------------
+# 1) RÀNQUING DE CCAA PER INFRAQUALIFICACIÓ
+#    dins de cada ocupació
+# --------------------------------------------------
+ranking_ccaa_infra <- copy(taula_ccaa_desajust)[
+  order(OCUP1, Infraqualificat, COMUNIDAD)
+][
+  , .(
+    OCUP1,
+    OCUPACIO = OCUPACION,
+    CCAA,
+    COMUNITAT = COMUNIDAD,
+    `Percentatge infraqualificació` = Infraqualificat
+  )
+]
+
+ranking_ccaa_infra[, Posicio := seq_len(.N), by = .(OCUP1, OCUPACIO)]
+
+# --------------------------------------------------
+# 2) RÀNQUING DE CCAA PER AJUST
+#    dins de cada ocupació
+# --------------------------------------------------
+ranking_ccaa_ajust <- copy(taula_ccaa_desajust)[
+  order(OCUP1, Ajustat, COMUNIDAD)
+][
+  , .(
+    OCUP1,
+    OCUPACIO = OCUPACION,
+    CCAA,
+    COMUNITAT = COMUNIDAD,
+    `Percentatge ajust` = Ajustat
+  )
+]
+
+ranking_ccaa_ajust[, Posicio := seq_len(.N), by = .(OCUP1, OCUPACIO)]
+
+# --------------------------------------------------
+# 3) RÀNQUING DE CCAA PER SOBREQUALIFICACIÓ
+#    dins de cada ocupació
+# --------------------------------------------------
+ranking_ccaa_sobre <- copy(taula_ccaa_desajust)[
+  order(OCUP1, Sobrequalificat, COMUNIDAD)
+][
+  , .(
+    OCUP1,
+    OCUPACIO = OCUPACION,
+    CCAA,
+    COMUNITAT = COMUNIDAD,
+    `Percentatge sobrequalificació` = Sobrequalificat
+  )
+]
+
+ranking_ccaa_sobre[, Posicio := seq_len(.N), by = .(OCUP1, OCUPACIO)]
+
+# --------------------------------------------------
+# 4) VEURE RESULTATS
+# --------------------------------------------------
+print(ranking_ccaa_infra)
+print(ranking_ccaa_ajust)
+print(ranking_ccaa_sobre)
+
+View(ranking_ccaa_infra)
+View(ranking_ccaa_ajust)
+View(ranking_ccaa_sobre)
+
+# --------------------------------------------------
+# 5) OPCIONAL: GUARDAR CSV
+# --------------------------------------------------
+write.csv(ranking_ccaa_infra, "ranking_ccaa_infra_per_ocupacio.csv", row.names = FALSE)
+write.csv(ranking_ccaa_ajust, "ranking_ccaa_ajust_per_ocupacio.csv", row.names = FALSE)
+write.csv(ranking_ccaa_sobre, "ranking_ccaa_sobre_per_ocupacio.csv", row.names = FALSE)
+```
+
+````{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# -------------------------------
+# 1) ETIQUETAS DE CCAA
+# -------------------------------
+etiqueta_ccaa <- function(x) {
+  fcase(
+    x == "01", "Andalusia",
+    x == "02", "Aragó",
+    x == "03", "Astúries",
+    x == "04", "Illes Balears",
+    x == "05", "Canàries",
+    x == "06", "Cantàbria",
+    x == "07", "Castella i Lleó",
+    x == "08", "Castella-La Manxa",
+    x == "09", "Catalunya",
+    x == "10", "Comunitat Valenciana",
+    x == "11", "Extremadura",
+    x == "12", "Galícia",
+    x == "13", "Madrid",
+    x == "14", "Múrcia",
+    x == "15", "Navarra",
+    x == "16", "País Basc",
+    x == "17", "La Rioja",
+    x == "51", "Ceuta",
+    x == "52", "Melilla",
+    default = x
+  )
+}
+
+# -------------------------------
+# 2) BASE: SOLO OCUPADOS
+# -------------------------------
+base_act_ccaa <- EPA_2005_2025v2[
+  !is.na(AOI) &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # solo ocupados
+  !is.na(CCAA) & trimws(as.character(CCAA)) != "" &
+  !is.na(ACT1) & trimws(as.character(ACT1)) != "" &
+  !is.na(FACTOREL),
+  .(
+    CCAA = sprintf("%02d", as.integer(CCAA)),
+    ACT1 = trimws(as.character(ACT1)),
+    FACTOREL
+  )
+]
+
+# -------------------------------
+# 3) ETIQUETAS
+# -------------------------------
+base_act_ccaa[, COMUNITAT := etiqueta_ccaa(CCAA)]
+
+# Si no quieres poner nombres concretos de actividad,
+# dejamos el código ACT1 visible así:
+base_act_ccaa[, ACTIVITAT := paste0("ACT1_", ACT1)]
+
+# -------------------------------
+# 4) RESUMEN PONDERADO
+# -------------------------------
+resum <- base_act_ccaa[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(COMUNITAT, ACTIVITAT)
+]
+
+# porcentaje dentro de cada CCAA
+resum[, pct := 100 * valor / sum(valor), by = COMUNITAT]
+
+# -------------------------------
+# 5) TABLA AMPLIA
+# -------------------------------
+taula_act_ccaa <- dcast(
+  resum,
+  COMUNITAT ~ ACTIVITAT,
+  value.var = "pct",
+  fill = 0
+)
+
+# -------------------------------
+# 6) ORDENAR CCAA
+# -------------------------------
+ordre_ccaa <- c(
+  "Andalusia", "Aragó", "Astúries", "Illes Balears", "Canàries",
+  "Cantàbria", "Castella i Lleó", "Castella-La Manxa", "Catalunya",
+  "Comunitat Valenciana", "Extremadura", "Galícia", "Madrid",
+  "Múrcia", "Navarra", "País Basc", "La Rioja", "Ceuta", "Melilla"
+)
+
+taula_act_ccaa[, COMUNITAT := factor(COMUNITAT, levels = ordre_ccaa, ordered = TRUE)]
+setorder(taula_act_ccaa, COMUNITAT)
+taula_act_ccaa[, COMUNITAT := as.character(COMUNITAT)]
+
+# -------------------------------
+# 7) REDONDEAR
+# -------------------------------
+cols_num <- setdiff(names(taula_act_ccaa), "COMUNITAT")
+taula_act_ccaa[, (cols_num) := lapply(.SD, function(x) round(x, 2)), .SDcols = cols_num]
+
+print(taula_act_ccaa)
+View(taula_act_ccaa)
+
+# comprobación: cada fila debe sumar 100
+taula_check <- copy(taula_act_ccaa)
+taula_check[, Total := round(rowSums(.SD), 2), .SDcols = cols_num]
+print(taula_check[, .(COMUNITAT, Total)])
+````
+
+#grafic x edats
+```{r}
+library(data.table)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) FUNCIÓ PER AGRUPAR A PARTIR D'EDAD5 (antics anys)
+# --------------------------------------------------
+agrupar_desde_EDAD5 <- function(x) {
+  x <- trimws(as.character(x))
+  
+  fcase(
+    x %in% c("16", "20", "25"), "16-29 anys",
+    x %in% c("30", "35", "40"), "30-44 anys",
+    x %in% c("45", "50", "55"), "45-59 anys",
+    x %in% c("60", "65"), "60 o més anys",
+    default = NA_character_
+  )
+}
+
+# --------------------------------------------------
+# 3) FUNCIÓ PER AGRUPAR DES D'EDAT NUMÈRICA
+# --------------------------------------------------
+agrupar_desde_num <- function(x) {
+  x <- suppressWarnings(as.numeric(as.character(x)))
+  
+  fcase(
+    x >= 16 & x <= 29, "16-29 anys",
+    x >= 30 & x <= 44, "30-44 anys",
+    x >= 45 & x <= 59, "45-59 anys",
+    x >= 60, "60 o més anys",
+    default = NA_character_
+  )
+}
+
+ordre_edat4 <- c("16-29 anys", "30-44 anys", "45-59 anys", "60 o més anys")
+
+# --------------------------------------------------
+# 4) CREAR VARIABLE D'EDAT FUSIONADA
+#    PRIORITAT:
+#    - EDAD5 (quan existeixi i funcioni)
+#    - EDAT_NUM_1
+#    - EDAT_NUM_2
+#    - EDAD1
+# --------------------------------------------------
+EPA_2005_2025v2[, EDAT_4GRUPS_FUSIO := NA_character_]
+
+if ("EDAD5" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, EDAT_4GRUPS_FUSIO := agrupar_desde_EDAD5(EDAD5)]
+}
+
+if ("EDAT_NUM_1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[
+    is.na(EDAT_4GRUPS_FUSIO),
+    EDAT_4GRUPS_FUSIO := agrupar_desde_num(EDAT_NUM_1)
+  ]
+}
+
+if ("EDAT_NUM_2" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[
+    is.na(EDAT_4GRUPS_FUSIO),
+    EDAT_4GRUPS_FUSIO := agrupar_desde_num(EDAT_NUM_2)
+  ]
+}
+
+if ("EDAD1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[
+    is.na(EDAT_4GRUPS_FUSIO),
+    EDAT_4GRUPS_FUSIO := agrupar_desde_num(EDAD1)
+  ]
+}
+
+# --------------------------------------------------
+# 5) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 6) BASE: NOMÉS OCUPATS
+# --------------------------------------------------
+base_edat <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+    !is.na(AOI) &
+    trimws(as.character(AOI)) != "" &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &
+    !is.na(EDAT_4GRUPS_FUSIO) &
+    !is.na(FACTOREL),
+  .(
+    ANY,
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    EDAT_4GRUPS = EDAT_4GRUPS_FUSIO,
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 7) MODA EDUCATIVA GLOBAL PER OCUPACIÓ
+# --------------------------------------------------
+moda_ocup <- base_edat[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 8) CLASSIFICAR DESAJUST
+# --------------------------------------------------
+base_edat[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_edat <- merge(
+  base_edat,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+base_edat[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+ordre_desajust <- c("Infraqualificació", "Ajust", "Sobrequalificació")
+colors_desajust <- c(
+  "Infraqualificació" = "red3",
+  "Ajust" = "gray50",
+  "Sobrequalificació" = "yellowgreen"
+)
+
+# --------------------------------------------------
+# 9) RESUM PER ANY, GRUP D'EDAT I DESAJUST
+# --------------------------------------------------
+resum_edat4 <- base_edat[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(ANY, EDAT_4GRUPS, DESAJUST_MODA)
+]
+
+resum_edat4[, pct := 100 * valor / sum(valor), by = .(ANY, EDAT_4GRUPS)]
+
+# Completar totes les combinacions per assegurar tots els anys
+base_completa <- CJ(
+  ANY = 2005:2025,
+  EDAT_4GRUPS = ordre_edat4,
+  DESAJUST_MODA = ordre_desajust
+)
+
+resum_edat4 <- merge(
+  base_completa,
+  resum_edat4,
+  by = c("ANY", "EDAT_4GRUPS", "DESAJUST_MODA"),
+  all.x = TRUE
+)
+
+resum_edat4[is.na(pct), pct := 0]
+
+# --------------------------------------------------
+# 10) FUNCIÓ PER DIBUIXAR CADA PANELL
+# --------------------------------------------------
+dibuixa_panell_edat <- function(grup_edat) {
+  
+  sub <- resum_edat4[EDAT_4GRUPS == grup_edat]
+  
+  plot(
+    NA, NA,
+    xlim = c(2005, 2025),
+    ylim = c(0, 80),
+    xlab = "Any",
+    ylab = "Percentatge",
+    main = grup_edat,
+    xaxt = "n",
+    yaxt = "n"
+  )
+  
+  axis(1, at = seq(2005, 2025, by = 2))
+  axis(2, at = seq(0, 80, by = 10), labels = paste0(seq(0, 80, by = 10), "%"))
+  
+  abline(h = seq(0, 80, by = 10), col = "gray90", lty = 1)
+  abline(v = seq(2005, 2025, by = 1), col = "gray92", lty = 3)
+  
+  for (cat in ordre_desajust) {
+    sub_cat <- sub[DESAJUST_MODA == cat][order(ANY)]
+    
+    lines(
+      sub_cat$ANY,
+      sub_cat$pct,
+      col = colors_desajust[cat],
+      lwd = 2
+    )
+    
+    points(
+      tail(sub_cat$ANY, 1),
+      tail(sub_cat$pct, 1),
+      pch = 16,
+      col = colors_desajust[cat],
+      cex = 0.8
+    )
+    
+    text(
+      x = tail(sub_cat$ANY, 1) + 0.25,
+      y = tail(sub_cat$pct, 1),
+      labels = paste0(round(tail(sub_cat$pct, 1), 1), "%"),
+      col = colors_desajust[cat],
+      cex = 0.75,
+      pos = 4,
+      xpd = TRUE
+    )
+  }
+}
+
+# --------------------------------------------------
+# 11) GRÀFIC FINAL 2x2 AMB LLEGENDA
+# --------------------------------------------------
+jpeg(
+  "desajust_edat_4grups_4grafics_amb_llegenda.jpg",
+  width = 2600,
+  height = 2200,
+  res = 220
+)
+
+layout(matrix(1:4, nrow = 2, byrow = TRUE))
+par(oma = c(4, 0, 4, 0))
+
+par(mar = c(4, 5, 4, 4))
+dibuixa_panell_edat("16-29 anys")
+
+par(mar = c(4, 5, 4, 4))
+dibuixa_panell_edat("30-44 anys")
+
+par(mar = c(4, 5, 4, 4))
+dibuixa_panell_edat("45-59 anys")
+
+par(mar = c(4, 5, 4, 4))
+dibuixa_panell_edat("60 o més anys")
+
+mtext(
+  "Evolució del desajust educatiu segons 4 grans grups d'edat a Espanya (2005-2025)",
+  outer = TRUE,
+  cex = 1.3,
+  line = 1
+)
+
+# Llegenda general a la part inferior
+par(fig = c(0, 1, 0, 1), new = TRUE, mar = c(0, 0, 0, 0), oma = c(0, 0, 0, 0))
+plot.new()
+legend(
+  "bottom",
+  legend = ordre_desajust,
+  col = colors_desajust,
+  lwd = 2,
+  pch = 16,
+  horiz = TRUE,
+  bty = "o",
+  bg = "white",
+  cex = 0.95,
+  inset = c(0, 0.02)
+)
+
+dev.off()
+
+# --------------------------------------------------
+# 12) COMPROVACIÓ RÀPIDA
+# --------------------------------------------------
+print(table(base_edat$ANY, base_edat$EDAT_4GRUPS))
+```
+
+
+#Gràfic mapa espanya
+```{r}
+library(data.table)
+library(ggplot2)
+library(sf)
+library(mapSpain)
+library(patchwork)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) BASE: NOMÉS OCUPATS
+# --------------------------------------------------
+base_ccaa <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+    !is.na(AOI) &
+    trimws(as.character(AOI)) != "" &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &
+    !is.na(CCAA) & trimws(as.character(CCAA)) != "" &
+    !is.na(FACTOREL),
+  .(
+    CCAA = sprintf("%02d", as.integer(CCAA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 4) MODA EDUCATIVA GLOBAL PER OCUPACIÓ
+# --------------------------------------------------
+moda_ocup <- base_ccaa[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 5) UNIR MODA I CLASSIFICAR DESAJUST
+# --------------------------------------------------
+base_ccaa[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_ccaa <- merge(
+  base_ccaa,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+base_ccaa[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+# --------------------------------------------------
+# 6) RESUM PER CCAA
+# --------------------------------------------------
+resum_ccaa <- base_ccaa[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(CCAA, DESAJUST_MODA)
+]
+
+resum_ccaa[, pct := 100 * valor / sum(valor), by = CCAA]
+
+resum_ccaa <- resum_ccaa[
+  DESAJUST_MODA %in% c("Infraqualificació", "Sobrequalificació")
+]
+
+taula_ccaa <- dcast(
+  resum_ccaa,
+  CCAA ~ DESAJUST_MODA,
+  value.var = "pct",
+  fill = 0
+)
+
+# --------------------------------------------------
+# 7) MAPA DE CCAA
+#    IMPORTANT: mapSpain fa servir codis 01-19
+#    i a la EPA Ceuta/Melilla solen aparèixer com 51/52
+# --------------------------------------------------
+lookup_ccaa <- data.table(
+  CCAA = c("01","02","03","04","05","06","07","08","09","10",
+           "11","12","13","14","15","16","17","51","52"),
+  CCAA_map = c("01","02","03","04","05","06","07","08","09","10",
+               "11","12","13","14","15","16","17","18","19")
+)
+
+taula_ccaa <- merge(taula_ccaa, lookup_ccaa, by = "CCAA", all.x = TRUE)
+
+# descarrega/obre el mapa d'Espanya per CCAA
+mapa_ccaa <- esp_get_ccaa(moveCAN = TRUE)
+
+# detectar camp de codi del mapa
+camp_codi <- intersect(c("codauto", "codautoine"), names(mapa_ccaa))[1]
+
+if (is.na(camp_codi)) {
+  stop("No s'ha pogut identificar la variable de codi del mapa de CCAA.")
+}
+
+mapa_ccaa[[camp_codi]] <- sprintf("%02d", as.integer(mapa_ccaa[[camp_codi]]))
+
+# unir dades al mapa
+mapa_ccaa <- merge(
+  mapa_ccaa,
+  taula_ccaa,
+  by.x = camp_codi,
+  by.y = "CCAA_map",
+  all.x = TRUE
+)
+
+# --------------------------------------------------
+# 8) PREPARAR ETIQUETES DE PERCENTATGE
+# --------------------------------------------------
+mapa_labels <- st_point_on_surface(mapa_ccaa)
+
+mapa_labels$label_sobre <- ifelse(
+  is.na(mapa_labels$Sobrequalificació),
+  "",
+  paste0(round(mapa_labels$Sobrequalificació, 1), "%")
+)
+
+mapa_labels$label_infra <- ifelse(
+  is.na(mapa_labels$Infraqualificació),
+  "",
+  paste0(round(mapa_labels$Infraqualificació, 1), "%")
+)
+
+# --------------------------------------------------
+# 9) MAPES
+# --------------------------------------------------
+p_sobre <- ggplot(mapa_ccaa) +
+  geom_sf(aes(fill = Sobrequalificació), color = "white", linewidth = 0.2) +
+  geom_sf_text(
+    data = mapa_labels,
+    aes(label = label_sobre),
+    size = 3,
+    color = "darkgrey"
+  ) +
+  scale_fill_gradient(
+    low = "white",
+    high = "olivedrab2",
+    na.value = "grey90",
+    name = "%"
+  ) +
+  labs(
+    title = "Sobrequalificació per comunitat autònoma",
+    subtitle = "Espanya, període 2005-2025"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(size = 10),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+p_infra <- ggplot(mapa_ccaa) +
+  geom_sf(aes(fill = Infraqualificació), color = "white", linewidth = 0.2) +
+  geom_sf_text(
+    data = mapa_labels,
+    aes(label = label_infra),
+    size = 3,
+    color = "darkgrey"
+  ) +
+  scale_fill_gradient(
+    low = "white",
+    high = "darkorange",
+    na.value = "grey90",
+    name = "%"
+  ) +
+  labs(
+    title = "Infraqualificació per comunitat autònoma",
+    subtitle = "Espanya, període 2005-2025"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(size = 10),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+mapa_final <- p_sobre + p_infra + plot_layout(ncol = 2)
+
+# mostrar
+mapa_final
+
+# --------------------------------------------------
+# 10) GUARDAR FIGURA
+# --------------------------------------------------
+ggsave(
+  filename = "mapa_desajust_ccaa_sobre_infra_2005_2025_amb_percentatges.jpg",
+  plot = mapa_final,
+  width = 14,
+  height = 7,
+  dpi = 300
+)
+```
+
+```{r}
+
+```
+
+
+```{r}
+library(data.table)
+library(ggplot2)
+library(sf)
+library(mapSpain)
+
+setDT(EPA_2005_2025v2)
+
+# --------------------------------------------------
+# 1) SI NO EXISTEIX ANY, EL CREEM A PARTIR DE CICLO
+# --------------------------------------------------
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# --------------------------------------------------
+# 2) ORDRE EDUCATIU
+# --------------------------------------------------
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# --------------------------------------------------
+# 3) BASE: NOMÉS OCUPATS
+# --------------------------------------------------
+base_ccaa <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+    !is.na(AOI) &
+    trimws(as.character(AOI)) != "" &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &
+    !is.na(CCAA) & trimws(as.character(CCAA)) != "" &
+    !is.na(FACTOREL),
+  .(
+    CCAA = sprintf("%02d", as.integer(CCAA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    NFORMA = trimws(as.character(NFORMA)),
+    FACTOREL
+  )
+]
+
+# --------------------------------------------------
+# 4) MODA EDUCATIVA GLOBAL PER OCUPACIÓ
+# --------------------------------------------------
+moda_ocup <- base_ccaa[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda_ocup[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_ocup_final <- moda_ocup[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_ocup_final, "NFORMA", "NFORMA_MODA")
+
+# --------------------------------------------------
+# 5) UNIR MODA I CLASSIFICAR DESAJUST
+# --------------------------------------------------
+base_ccaa[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_ccaa <- merge(
+  base_ccaa,
+  moda_ocup_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+base_ccaa[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificació",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificació"
+)]
+
+# --------------------------------------------------
+# 6) RESUM PER CCAA
+# --------------------------------------------------
+resum_ccaa <- base_ccaa[
+  ,
+  .(valor = sum(FACTOREL, na.rm = TRUE)),
+  by = .(CCAA, DESAJUST_MODA)
+]
+
+resum_ccaa[, pct := 100 * valor / sum(valor), by = CCAA]
+
+resum_ccaa <- resum_ccaa[
+  DESAJUST_MODA %in% c("Infraqualificació", "Sobrequalificació")
+]
+
+taula_ccaa <- dcast(
+  resum_ccaa,
+  CCAA ~ DESAJUST_MODA,
+  value.var = "pct",
+  fill = 0
+)
+
+# --------------------------------------------------
+# 7) CALCULAR SALDO NET
+# --------------------------------------------------
+taula_ccaa[, saldo_net := Sobrequalificació - Infraqualificació]
+taula_ccaa[, label_saldo := paste0(round(saldo_net, 1), "%")]
+
+# --------------------------------------------------
+# 8) MAPA DE CCAA
+#    mapSpain fa servir codis 01-19
+#    a la EPA Ceuta/Melilla solen aparèixer com 51/52
+# --------------------------------------------------
+lookup_ccaa <- data.table(
+  CCAA = c("01","02","03","04","05","06","07","08","09","10",
+           "11","12","13","14","15","16","17","51","52"),
+  CCAA_map = c("01","02","03","04","05","06","07","08","09","10",
+               "11","12","13","14","15","16","17","18","19")
+)
+
+taula_ccaa <- merge(taula_ccaa, lookup_ccaa, by = "CCAA", all.x = TRUE)
+
+mapa_ccaa <- esp_get_ccaa(moveCAN = TRUE)
+
+camp_codi <- intersect(c("codauto", "codautoine"), names(mapa_ccaa))[1]
+
+if (is.na(camp_codi)) {
+  stop("No s'ha pogut identificar la variable de codi del mapa de CCAA.")
+}
+
+mapa_ccaa[[camp_codi]] <- sprintf("%02d", as.integer(mapa_ccaa[[camp_codi]]))
+
+mapa_ccaa <- merge(
+  mapa_ccaa,
+  taula_ccaa,
+  by.x = camp_codi,
+  by.y = "CCAA_map",
+  all.x = TRUE
+)
+
+# --------------------------------------------------
+# 9) CONTORN EXTERIOR D'ESPANYA
+# --------------------------------------------------
+contorn_espanya <- st_as_sf(
+  data.table(geometry = st_boundary(st_union(st_geometry(mapa_ccaa))))
+)
+
+# punts interiors per posar l'etiqueta
+mapa_labels <- st_point_on_surface(mapa_ccaa)
+
+# --------------------------------------------------
+# 10) LÍMIT SIMÈTRIC DE COLORS
+# --------------------------------------------------
+lim <- max(abs(mapa_ccaa$saldo_net), na.rm = TRUE)
+
+# --------------------------------------------------
+# 11) MAPA DEL SALDO NET
+# --------------------------------------------------
+p_saldo <- ggplot(mapa_ccaa) +
+  geom_sf(aes(fill = saldo_net), color = "gray85", linewidth = 0.2) +
+  geom_sf(data = contorn_espanya, color = "gray40", linewidth = 0.35, fill = NA) +
+  geom_sf_text(
+    data = mapa_labels,
+    aes(label = label_saldo),
+    size = 3,
+    color = "gray35"
+  ) +
+  scale_fill_gradient2(
+    low = "steelblue4",
+    mid = "white",
+    high = "darkgoldenrod1",
+    midpoint = 0,
+    limits = c(-lim, lim),
+    na.value = "grey90",
+    name = "%"
+  ) +
+  labs(
+    title = "Saldo net del desajust educatiu per comunitat autònoma",
+    subtitle = "Sobrequalificació menys infraqualificació. Espanya, 2005-2025"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(size = 10),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+# mostrar
+p_saldo
+
+# --------------------------------------------------
+# 12) GUARDAR FIGURA
+# --------------------------------------------------
+ggsave(
+  filename = "mapa_saldo_net_desajust_ccaa_2005_2025.jpg",
+  plot = p_saldo,
+  width = 8,
+  height = 7,
+  dpi = 300
+)
+```
+

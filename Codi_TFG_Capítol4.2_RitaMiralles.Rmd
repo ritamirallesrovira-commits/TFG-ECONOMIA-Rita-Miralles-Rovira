@@ -1,0 +1,240 @@
+---
+title: "Punt 4.2"
+author: "Rita Miralles Rovira"
+date: "2026-04-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Aquest segon R Markdown del punt 4 permet un cop havent llegit les dades de manera trimestral i haver-les agregat anualment, unificar-les en una sola base de dades amb la que poder fer l'anàlisi del treball.
+
+```{r}
+setwd("~/Desktop/DADES")
+anys <- 2005:2020
+df_total <- NULL
+
+omplir_cols <- function(df, all_names){
+  faltan <- setdiff(all_names, names(df))
+  df[faltan] <- NA
+  df[, all_names, drop = FALSE]
+}
+
+for (any in anys) {
+  
+  fitxer <- paste0("EPA_", any, ".RData")
+  
+  env <- new.env()
+  load(fitxer, envir = env)
+  
+  nom_objecte <- ls(env)[1]
+  df <- env[[nom_objecte]]
+  
+  if (is.null(df_total)) {
+    df_total <- df
+  } else {
+    all_names <- unique(c(names(df_total), names(df)))
+    
+    df_total <- rbind(
+      omplir_cols(df_total, all_names),
+      omplir_cols(df, all_names)
+    )
+  }
+  
+  rm(env, df)
+  gc()
+}
+
+save(df_total, file = "EPA_2005_2020.RData")
+```
+
+```{r}
+
+# 0. Paquet
+install.packages("data.table")   # només la primera vegada
+library(data.table)
+
+
+# 1. Carpeta de treball
+setwd("~/Desktop/DADES")
+
+# 2. Fitxers a unir
+fitxers <- c(
+  "EPA_2005_2020.RData",
+  "EPA_2021.RData",
+  "EPA_2022.RData",
+  "EPA_2023.RData",
+  "EPA_2024.RData",
+  "EPA_2025.RData"
+)
+
+# 3. Funció per carregar un .RData
+carregar_rdata <- function(fitxer){
+  env <- new.env()
+  noms <- load(fitxer, envir = env)
+  obj <- env[[noms[1]]]
+  as.data.table(obj)
+}
+
+
+# 4. Carregar tots els data frames
+llista_dfs <- lapply(fitxers, carregar_rdata)
+
+# 5. Guardar noms de columnes de cada fitxer
+noms_columnes <- lapply(llista_dfs, names)
+
+# 6. Crear llista de totes les columnes existents
+totes_les_columnes <- unique(unlist(noms_columnes))
+
+# 7. Unir tots els fitxers
+#    use.names=TRUE -> uneix per nom
+#    fill=TRUE -> si falta una columna, posa NA
+EPA_2005_2025 <- rbindlist(llista_dfs, use.names = TRUE, fill = TRUE)
+
+# 8. Guardar dataset principal
+save(EPA_2005_2025, file = "EPA_2005_2025.RData")
+
+
+# 9. Crear taula auxiliar de variables no incloses
+vars_no_incloses <- rbindlist(
+  lapply(seq_along(fitxers), function(i){
+    falten <- setdiff(totes_les_columnes, noms_columnes[[i]])
+    
+    if(length(falten) == 0){
+      return(NULL)
+    }
+    
+    data.table(
+      fitxer = fitxers[i],
+      variable = falten,
+      estat = "var no incluida"
+    )
+  }),
+  fill = TRUE
+)
+
+# 10. Guardar taula auxiliar
+save(vars_no_incloses, file = "vars_no_incloses_2005_2025.RData")
+
+# 11. Comprovacions
+dim(EPA_2005_2025)
+length(names(EPA_2005_2025))
+head(names(EPA_2005_2025))
+
+dim(vars_no_incloses)
+head(vars_no_incloses)
+```
+
+#canvi poblacional!
+```{r}
+setwd("~/Desktop/DADES")
+library(data.table)
+
+
+# 1. Carregar base principal
+load("EPA_2005_2025.RData")
+setDT(EPA_2005_2025)
+
+EPA_2005_2025[, NVIVI := as.character(NVIVI)]
+EPA_2005_2025[, CICLO := as.character(CICLO)]
+
+# 2. Funció per carregar l'objecte correcte de cada annexe 
+carregar_anexo_microdatos <- function(fitxer){
+  env <- new.env()
+  load(fitxer, envir = env)
+  
+  noms_obj <- ls(env)
+  obj_valid <- NULL
+  
+  for(n in noms_obj){
+    x <- env[[n]]
+    if(is.data.frame(x) || is.data.table(x)){
+      if(all(c("NVIVI", "CICLO", "FACB2021") %in% names(x))){
+        obj_valid <- x
+        break
+      }
+    }
+  }
+  
+  if(is.null(obj_valid)){
+    stop(paste("No s'ha trobat cap objecte amb NVIVI, CICLO i FACB2021 a", fitxer))
+  }
+  
+  obj_valid <- as.data.table(obj_valid)
+  obj_valid[, NVIVI := as.character(NVIVI)]
+  obj_valid[, CICLO := as.character(CICLO)]
+  
+  # només info necessari
+  unique(obj_valid[, .(NVIVI, CICLO, FACB2021)])
+}
+
+
+# 3. Carregar tots els annexes 2021-2023
+
+fitxers_anexos <- list.files(
+  pattern = "^EPAAnexo_202[1-3]T[1-4]\\.RData$"
+)
+
+anexos_2021_2023 <- rbindlist(
+  lapply(fitxers_anexos, carregar_anexo_microdatos),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+
+# 4. NVIVI + CICLO
+
+EPA_2005_2025[anexos_2021_2023, FACB2021 := i.FACB2021, on = .(NVIVI, CICLO)]
+
+
+# 5. pes  final d'análisi
+#    - si existeix FACB2021, utilitzar
+#    - si no, FACTOREL
+
+EPA_2005_2025[, PESO_ANALISIS := FACTOREL]
+EPA_2005_2025[!is.na(FACB2021), PESO_ANALISIS := FACB2021]
+
+
+# 6. Dummy base 2021
+#    (només per observacions FACB2021 disponible)
+
+EPA_2005_2025[, CAMBIO_BASE_2021 := ifelse(!is.na(FACB2021), 1, 0)]
+
+# 7. Comprobació
+comprovacio <- EPA_2005_2025[
+  !is.na(FACB2021) | grepl("^20", CICLO),
+  .(
+    total_registres = .N,
+    amb_facb2021 = sum(!is.na(FACB2021)),
+    sense_facb2021 = sum(is.na(FACB2021))
+  ),
+  by = CICLO
+]
+
+print(comprovacio)
+
+
+# 8. Guardar nou nom
+EPA_2005_2025v2 <- EPA_2005_2025
+save(EPA_2005_2025v2, file = "EPA_2005_2025v2.RData")
+```
+```{r}
+
+#comprobacio 
+nrow(EPA_2005_2025)
+nrow(EPA_2005_2025v2)
+
+c("FACB2021", "PESO_ANALISIS", "CAMBIO_BASE_2021") %in% names(EPA_2005_2025v2)
+
+sum(!is.na(EPA_2005_2025v2$FACB2021))
+
+sum(EPA_2005_2025v2$PESO_ANALISIS != EPA_2005_2025v2$FACB2021 & !is.na(EPA_2005_2025v2$FACB2021), na.rm = TRUE)
+
+sum(EPA_2005_2025v2$PESO_ANALISIS != EPA_2005_2025v2$FACTOREL & is.na(EPA_2005_2025v2$FACB2021), na.rm = TRUE)
+
+table(EPA_2005_2025v2$CAMBIO_BASE_2021, is.na(EPA_2005_2025v2$FACB2021))
+```
+
+

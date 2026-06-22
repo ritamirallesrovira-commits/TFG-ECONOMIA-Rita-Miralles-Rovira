@@ -1,0 +1,3275 @@
+---
+title: "Models economètrics - TFG ECONOMIA"
+author: "Rita Miralles Rovira"
+date: "2026-05-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#MODEL MULTINOMIAL (MODEL DE REFERÈNCIA)
+
+```{r}
+
+# 0) PREPARACIÓ
+setwd("~/Desktop/DADES")
+load("EPA_2005_2025v2.RData")
+rm(list = setdiff(ls(), "EPA_2005_2025v2"))
+
+library(data.table)
+library(nnet)
+
+setDT(EPA_2005_2025v2)
+
+
+# 1) FUNCIÓ PER COMPROVAR SI ANY ÉS VÀLID
+
+es_any_valid <- function(x) {
+  x <- suppressWarnings(as.integer(x))
+  x <- x[!is.na(x)]
+  if (length(x) == 0) return(FALSE)
+  anys_uniques <- sort(unique(x))
+  cond1 <- min(anys_uniques) <= 2005
+  cond2 <- max(anys_uniques) >= 2025
+  cond3 <- length(anys_uniques) >= 10
+  cond1 && cond2 && cond3
+}
+
+
+# 2) ANY: PRIORITZAR EL QUE JA EXISTEIX SI ÉS BO
+
+if ("ANY" %in% names(EPA_2005_2025v2) && es_any_valid(EPA_2005_2025v2$ANY)) {
+  
+  EPA_2005_2025v2[, ANY := as.integer(ANY)]
+  cat("\nS'utilitza la variable ANY ja existent.\n")
+  
+} else {
+  
+  cat("\nANY no existeix o no és coherent. S'intenta reconstruir a partir de CICLO.\n")
+  
+  if (!"CICLO" %in% names(EPA_2005_2025v2)) {
+    stop("No existeix ANY vàlida i tampoc existeix CICLO per reconstruir-la.")
+  }
+  
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+}
+
+cat("\n====================\n")
+cat("RANG D'ANYS A LA BASE\n")
+print(range(EPA_2005_2025v2$ANY, na.rm = TRUE))
+
+cat("\nDISTRIBUCIÓ PER ANY (ABANS DE FILTRES)\n")
+print(EPA_2005_2025v2[, .N, by = ANY][order(ANY)])
+
+
+# 3) FUNCIÓ AUXILIAR: APROXIMAR EDAT A PARTIR D'EDAD5
+
+aprox_edat_edad5 <- function(x) {
+  x <- suppressWarnings(as.numeric(as.character(x)))
+  fcase(
+    x == 16, 17.5,
+    x == 20, 22.0,
+    x == 25, 27.0,
+    x == 30, 32.0,
+    x == 35, 37.0,
+    x == 40, 42.0,
+    x == 45, 47.0,
+    x == 50, 52.0,
+    x == 55, 57.0,
+    x == 60, 62.0,
+    x >= 65, 67.0,
+    default = NA_real_
+  )
+}
+
+
+# 4) FUNCIÓ AUXILIAR: APROXIMAR EDAT A PARTIR DE GRUPS
+
+aprox_edat_grup <- function(x) {
+  x <- trimws(tolower(as.character(x)))
+  
+  fcase(
+    x %in% c("16-29", "16-29 anys", "16 a 29 anys", "de 16 a 29 anys"), 22.5,
+    x %in% c("30-44", "30-44 anys", "30 a 44 anys", "de 30 a 44 anys"), 37.0,
+    x %in% c("45-59", "45-59 anys", "45 a 59 anys", "de 45 a 59 anys"), 52.0,
+    x %in% c("60+", "60 o més", "60 o més anys", "60 i més", "60 i mes"), 67.0,
+    default = NA_real_
+  )
+}
+
+
+# 5) CONSTRUIR EDAT HARMONITZADA
+
+EPA_2005_2025v2[, EDAT := NA_real_]
+
+# 5.1 exacta: EDAT_NUM_1
+if ("EDAT_NUM_1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, EDAT_tmp := suppressWarnings(as.numeric(as.character(EDAT_NUM_1)))]
+  EPA_2005_2025v2[is.na(EDAT) & !is.na(EDAT_tmp) & EDAT_tmp >= 16 & EDAT_tmp <= 99, EDAT := EDAT_tmp]
+  EPA_2005_2025v2[, EDAT_tmp := NULL]
+}
+
+# 5.2 exacta: EDAT_NUM_2
+if ("EDAT_NUM_2" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, EDAT_tmp := suppressWarnings(as.numeric(as.character(EDAT_NUM_2)))]
+  EPA_2005_2025v2[is.na(EDAT) & !is.na(EDAT_tmp) & EDAT_tmp >= 16 & EDAT_tmp <= 99, EDAT := EDAT_tmp]
+  EPA_2005_2025v2[, EDAT_tmp := NULL]
+}
+
+# 5.3 exacta: EDAD1
+if ("EDAD1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, EDAT_tmp := suppressWarnings(as.numeric(as.character(EDAD1)))]
+  EPA_2005_2025v2[is.na(EDAT) & !is.na(EDAT_tmp) & EDAT_tmp >= 16 & EDAT_tmp <= 99, EDAT := EDAT_tmp]
+  EPA_2005_2025v2[, EDAT_tmp := NULL]
+}
+
+# 5.4 exacta: EDAT1
+if ("EDAT1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, EDAT_tmp := suppressWarnings(as.numeric(as.character(EDAT1)))]
+  EPA_2005_2025v2[is.na(EDAT) & !is.na(EDAT_tmp) & EDAT_tmp >= 16 & EDAT_tmp <= 99, EDAT := EDAT_tmp]
+  EPA_2005_2025v2[, EDAT_tmp := NULL]
+}
+
+# 5.5 aproximada: EDAD5
+if ("EDAD5" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[is.na(EDAT), EDAT := aprox_edat_edad5(EDAD5)]
+}
+
+# 5.6 aproximada: GRUP_EDAT
+if ("GRUP_EDAT" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[is.na(EDAT), EDAT := aprox_edat_grup(GRUP_EDAT)]
+}
+
+# 5.7 aproximada: EDAT_TRAM
+if ("EDAT_TRAM" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[is.na(EDAT), EDAT := aprox_edat_grup(EDAT_TRAM)]
+}
+
+cat("\n====================\n")
+cat("OBSERVACIONS AMB EDAT DISPONIBLE PER ANY\n")
+print(EPA_2005_2025v2[!is.na(EDAT), .N, by = ANY][order(ANY)])
+
+
+# 6) ORDRE EDUCATIU
+
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+
+# 7) BASE INICIAL
+#    només ocupats, 2005-2025, sense militars
+
+base_multinom <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+    !is.na(AOI) &
+    trimws(as.character(AOI)) != "" &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &
+    !is.na(ANY) &
+    !is.na(SEXO1) & trimws(as.character(SEXO1)) %in% c("1", "6") &
+    !is.na(CCAA) & trimws(as.character(CCAA)) != "" &
+    !is.na(EDAT) &
+    !is.na(FACTOREL),
+  .(
+    ANY,
+    NFORMA = trimws(as.character(NFORMA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    SEXO1 = trimws(as.character(SEXO1)),
+    CCAA = sprintf("%02d", as.integer(CCAA)),
+    EDAT,
+    FACTOREL
+  )
+]
+
+cat("\n====================\n")
+cat("MOSTRA DESPRÉS DEL FILTRE PRINCIPAL\n")
+cat("\nNombre d'observacions:\n")
+print(nrow(base_multinom))
+
+cat("\nDistribució per ANY després del filtre principal:\n")
+print(base_multinom[, .N, by = ANY][order(ANY)])
+
+
+# 8) MODA EDUCATIVA PER OCUPACIÓ (PONDERADA)
+
+moda <- base_multinom[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_final <- moda[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_final, "NFORMA", "NFORMA_MODA")
+
+
+# 9) ASSIGNAR MODA
+
+base_multinom[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_multinom <- merge(
+  base_multinom,
+  moda_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+
+# 10) VARIABLE DE DESAJUST
+
+base_multinom[, DESAJUST := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificacio",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificacio"
+)]
+
+base_multinom[, DESAJUST_f := factor(
+  DESAJUST,
+  levels = c("Ajust", "Infraqualificacio", "Sobrequalificacio")
+)]
+
+cat("\nDistribució del desajust:\n")
+print(base_multinom[, .N, by = DESAJUST_f])
+
+
+# 11) VARIABLES EXPLICATIVES
+
+base_multinom[, dona := ifelse(SEXO1 == "6", 1, 0)]
+base_multinom[, CCAA_f := factor(CCAA)]
+
+base_multinom[, EDAT_c := EDAT - mean(EDAT, na.rm = TRUE)]
+base_multinom[, EDAT_c2 := EDAT_c^2]
+
+
+# 12) VARIABLE TEMPORAL FICTÍCIA PER BLOCS
+
+base_multinom[, PERIODE_chr := fcase(
+  ANY >= 2005 & ANY <= 2007, "Expansio_2005_2007",
+  ANY >= 2008 & ANY <= 2013, "Crisi_2008_2013",
+  ANY >= 2014 & ANY <= 2019, "Recuperacio_2014_2019",
+  ANY >= 2020 & ANY <= 2025, "Pandemia_Post_2020_2025",
+  default = NA_character_
+)]
+
+base_multinom <- base_multinom[!is.na(PERIODE_chr)]
+
+base_multinom[, PERIODE_f := factor(PERIODE_chr)]
+base_multinom[, PERIODE_f := droplevels(PERIODE_f)]
+
+cat("\nDistribució per PERIODE_f:\n")
+print(base_multinom[, .N, by = PERIODE_f][order(PERIODE_f)])
+
+cat("\nDistribució per ANY i PERIODE_f:\n")
+print(base_multinom[, .N, by = .(ANY, PERIODE_f)][order(ANY)])
+
+if ("Recuperacio_2014_2019" %in% levels(base_multinom$PERIODE_f)) {
+  base_multinom[, PERIODE_f := relevel(PERIODE_f, ref = "Recuperacio_2014_2019")]
+} else {
+  warning("La categoria Recuperacio_2014_2019 no existeix. Es manté la referència per defecte.")
+}
+
+base_multinom[, PERIODE_chr := NULL]
+
+
+# 13) MOSTRA FINAL COMPLETA
+
+base_multinom <- base_multinom[
+  !is.na(DESAJUST_f) &
+    !is.na(dona) &
+    !is.na(EDAT_c) &
+    !is.na(EDAT_c2) &
+    !is.na(CCAA_f) &
+    !is.na(PERIODE_f) &
+    !is.na(FACTOREL)
+]
+
+base_multinom[, DESAJUST_f := droplevels(DESAJUST_f)]
+base_multinom[, CCAA_f := droplevels(CCAA_f)]
+base_multinom[, PERIODE_f := droplevels(PERIODE_f)]
+
+cat("\n====================\n")
+cat("MOSTRA FINAL DEL MODEL\n")
+cat("\nNombre final d'observacions:\n")
+print(nrow(base_multinom))
+
+cat("\nNivells de DESAJUST_f:\n")
+print(levels(base_multinom$DESAJUST_f))
+print(base_multinom[, .N, by = DESAJUST_f])
+
+cat("\nNombre de nivells de CCAA_f:\n")
+print(length(levels(base_multinom$CCAA_f)))
+
+cat("\nNivells de PERIODE_f:\n")
+print(levels(base_multinom$PERIODE_f))
+print(base_multinom[, .N, by = PERIODE_f])
+
+
+# 14) COMPROVACIÓ FINAL
+
+if (uniqueN(base_multinom$DESAJUST_f) < 2) {
+  stop("DESAJUST_f només té 1 nivell després dels filtres.")
+}
+
+if (uniqueN(base_multinom$CCAA_f) < 2) {
+  stop("CCAA_f només té 1 nivell després dels filtres.")
+}
+
+if (uniqueN(base_multinom$PERIODE_f) < 2) {
+  stop("PERIODE_f només té 1 nivell després dels filtres.")
+}
+
+
+# 15) PESOS REESCALATS
+
+base_multinom[, pes_reesc := FACTOREL / mean(FACTOREL, na.rm = TRUE)]
+
+
+# 16) MODEL MULTINOMIAL DE REFERÈNCIA AMB PESOS
+
+m_multinom_ref <- multinom(
+  DESAJUST_f ~ dona + EDAT_c + EDAT_c2 + CCAA_f + PERIODE_f,
+  data = base_multinom,
+  weights = pes_reesc,
+  Hess = TRUE,
+  trace = FALSE,
+  MaxNWts = 20000
+)
+
+# 17) SUMMARY
+
+summary(m_multinom_ref)
+
+
+# 18) AIC
+cat("\nAIC del model:\n")
+print(AIC(m_multinom_ref))
+
+
+# 19) z I p-valors
+resum_multinom_ref <- summary(m_multinom_ref)
+
+coefs_ref <- resum_multinom_ref$coefficients
+ses_ref   <- resum_multinom_ref$standard.errors
+
+zvals_ref <- coefs_ref / ses_ref
+pvals_ref <- 2 * (1 - pnorm(abs(zvals_ref)))
+
+cat("\nCoeficients:\n")
+print(coefs_ref)
+
+cat("\nErrors estàndard:\n")
+print(ses_ref)
+
+cat("\nz-values:\n")
+print(zvals_ref)
+
+cat("\np-valors:\n")
+print(pvals_ref)
+
+# 20) TAULA NETA PER AL TFG
+
+keep_terms <- c(
+  "dona",
+  "EDAT_c",
+  "EDAT_c2",
+  "PERIODE_fExpansio_2005_2007",
+  "PERIODE_fCrisi_2008_2013",
+  "PERIODE_fPandemia_Post_2020_2025"
+)
+
+labels <- c(
+  "dona" = "Dona",
+  "EDAT_c" = "Edat (centrada)",
+  "EDAT_c2" = "Edat²",
+  "PERIODE_fExpansio_2005_2007" = "Expansió (vs Recuperació)",
+  "PERIODE_fCrisi_2008_2013" = "Crisi (vs Recuperació)",
+  "PERIODE_fPandemia_Post_2020_2025" = "Pandèmia/post (vs Recuperació)"
+)
+
+extreure_taula_multinom <- function(model, keep_terms, labels, base_data) {
+  
+  s <- summary(model)
+  coefs <- s$coefficients
+  ses   <- s$standard.errors
+  
+  zvals <- coefs / ses
+  pvals <- 2 * (1 - pnorm(abs(zvals)))
+  
+  res <- rbindlist(lapply(rownames(coefs), function(cat) {
+    data.table(
+      Comparacio = cat,
+      Variable = colnames(coefs),
+      Coef = as.numeric(coefs[cat, ]),
+      SE = as.numeric(ses[cat, ]),
+      z = as.numeric(zvals[cat, ]),
+      p = as.numeric(pvals[cat, ])
+    )
+  }))
+  
+  res <- res[Variable %in% keep_terms]
+  
+  res[, stars := fcase(
+    p < 0.001, "***",
+    p < 0.01,  "**",
+    p < 0.05,  "*",
+    p < 0.1,   ".",
+    default = ""
+  )]
+  
+  res[, Variable := labels[Variable]]
+  res[, valor := sprintf("%.3f%s\n(%.3f)", Coef, stars, SE)]
+  
+  taula <- dcast(
+    res[, .(Variable, Comparacio, valor)],
+    Variable ~ Comparacio,
+    value.var = "valor",
+    fill = ""
+  )
+  
+  files_extra <- data.table(
+    Variable = c("Observacions", "AIC", "Inclou CCAA", "Inclou períodes ficticis", "Pesos"),
+    `Infraqualificacio` = c(nrow(base_data), round(AIC(model), 1), "Sí", "Sí", "Sí"),
+    `Sobrequalificacio` = c(nrow(base_data), round(AIC(model), 1), "Sí", "Sí", "Sí")
+  )
+  
+  rbind(taula, files_extra, fill = TRUE)
+}
+
+taula_multinom_ref <- extreure_taula_multinom(
+  model = m_multinom_ref,
+  keep_terms = keep_terms,
+  labels = labels,
+  base_data = base_multinom
+)
+
+cat("\nTaula neta del model:\n")
+print(taula_multinom_ref)
+View(taula_multinom_ref)
+
+# 21) COMPROVACIÓ ESPECÍFICA DELS PERÍODES
+cat("\nCoeficients dels períodes ficticis:\n")
+print(coefs_ref[, grep("^PERIODE_f", colnames(coefs_ref), value = TRUE), drop = FALSE])
+
+cat("\np-valors dels períodes ficticis:\n")
+print(pvals_ref[, grep("^PERIODE_f", colnames(pvals_ref), value = TRUE), drop = FALSE])
+```
+```{r}
+library(data.table)
+library(ggplot2)
+
+setDT(base_multinom)
+
+# pesos
+w <- base_multinom$pes_reesc
+
+# mitjana d'edat usada al model
+edat_mitjana <- mean(base_multinom$EDAT, na.rm = TRUE)
+
+# nivells de la dependent
+nivells_resultat <- levels(base_multinom$DESAJUST_f)
+```
+
+```{r}
+# 1) PROBABILITATS PREDIDES PER SEXE
+
+pred_sexe_fun <- function(model, data, dona_val) {
+  tmp <- copy(data)
+  tmp[, dona := dona_val]
+  
+  probs <- as.data.table(as.matrix(predict(model, newdata = tmp, type = "probs")))
+  
+  data.table(
+    Infraqualificacio = weighted.mean(probs$Infraqualificacio, w = data$pes_reesc, na.rm = TRUE),
+    Ajust = weighted.mean(probs$Ajust, w = data$pes_reesc, na.rm = TRUE),
+    Sobrequalificacio = weighted.mean(probs$Sobrequalificacio, w = data$pes_reesc, na.rm = TRUE)
+  )
+}
+
+pred_sexe <- rbindlist(list(
+  cbind(data.table(Sexe = "Homes"), pred_sexe_fun(m_multinom_ref, base_multinom, 0)),
+  cbind(data.table(Sexe = "Dones"), pred_sexe_fun(m_multinom_ref, base_multinom, 1))
+), fill = TRUE)
+
+pred_sexe_long <- melt(
+  pred_sexe,
+  id.vars = "Sexe",
+  variable.name = "Resultat",
+  value.name = "Probabilitat"
+)
+
+# ordre dels panells: infra - ajust - sobre
+pred_sexe_long[, Resultat := factor(
+  Resultat,
+  levels = c("Infraqualificacio", "Ajust", "Sobrequalificacio"),
+  labels = c("Infraqualificació", "Ajust", "Sobrequalificació")
+)]
+
+g_sexe <- ggplot(pred_sexe_long, aes(x = Sexe, y = Probabilitat, fill = Resultat)) +
+  geom_col(width = 0.6) +
+  facet_wrap(~ Resultat, scales = "free_y") +
+  scale_fill_manual(values = c(
+    "Infraqualificació" = "red",
+    "Ajust" = "grey70",
+    "Sobrequalificació" = "olivedrab2"
+  )) +
+  scale_y_continuous(labels = function(x) paste0(round(100*x, 0), "%")) +
+  labs(
+    title = "Probabilitats predides segons sexe",
+    subtitle = "Model logit multinomial amb pesos",
+    x = NULL,
+    y = "Probabilitat predida"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none"
+  )
+
+print(g_sexe)
+
+ggsave("multinom_pred_sexe.jpg", g_sexe, width = 9, height = 4.8, dpi = 300)
+
+```
+
+```{r}
+
+# 2) PROBABILITATS PREDIDES SEGONS EDAT I SEXE
+
+pred_edat_sexe_fun <- function(model, data, edat_val, dona_val) {
+  tmp <- copy(data)
+  tmp[, dona := dona_val]
+  tmp[, EDAT := edat_val]
+  tmp[, EDAT_c := EDAT - edat_mitjana]
+  tmp[, EDAT_c2 := EDAT_c^2]
+  
+  probs <- as.data.table(as.matrix(predict(model, newdata = tmp, type = "probs")))
+  
+  data.table(
+    Ajust = weighted.mean(probs$Ajust, w = data$pes_reesc, na.rm = TRUE),
+    Infraqualificacio = weighted.mean(probs$Infraqualificacio, w = data$pes_reesc, na.rm = TRUE),
+    Sobrequalificacio = weighted.mean(probs$Sobrequalificacio, w = data$pes_reesc, na.rm = TRUE)
+  )
+}
+
+pred_edat_sexe <- rbindlist(lapply(16:70, function(e) {
+  rbindlist(lapply(c(0, 1), function(d) {
+    dt <- pred_edat_sexe_fun(m_multinom_ref, base_multinom, e, d)
+    dt[, `:=`(EDAT = e, dona = d)]
+    dt
+  }))
+}), fill = TRUE)
+
+pred_edat_sexe_long <- melt(
+  pred_edat_sexe,
+  id.vars = c("EDAT", "dona"),
+  variable.name = "Resultat",
+  value.name = "Probabilitat"
+)
+
+pred_edat_sexe_long[, Sexe := fifelse(dona == 1, "Dones", "Homes")]
+pred_edat_sexe_long[, Resultat := factor(
+  Resultat,
+  levels = c("Ajust", "Infraqualificacio", "Sobrequalificacio"),
+  labels = c("Ajust", "Infraqualificació", "Sobrequalificació")
+)]
+
+g_edat_sexe <- ggplot(
+  pred_edat_sexe_long,
+  aes(x = EDAT, y = Probabilitat, linetype = Sexe)
+) +
+  geom_line(linewidth = 0.9) +
+  facet_wrap(~ Resultat, scales = "free_y") +
+  scale_y_continuous(labels = function(x) paste0(round(100*x, 0), "%")) +
+  labs(
+    title = "Probabilitats predides segons edat i sexe",
+    subtitle = "Model logit multinomial amb pesos",
+    x = "Edat",
+    y = "Probabilitat predida",
+    linetype = NULL
+  ) +
+  theme_minimal()
+
+print(g_edat_sexe)
+
+ggsave("multinom_pred_edat_sexe.jpg", g_edat_sexe, width = 10, height = 5.5, dpi = 300)
+```
+
+```{r}
+
+# 3) COEFPLOT DE LES CCAA
+
+coefs <- summary(m_multinom_ref)$coefficients
+ses   <- summary(m_multinom_ref)$standard.errors
+
+extreu_coef_multinom <- function(prefix) {
+  dt <- rbindlist(lapply(rownames(coefs), function(cat) {
+    vars <- grep(paste0("^", prefix), colnames(coefs), value = TRUE)
+    data.table(
+      Resultat = cat,
+      Variable = vars,
+      Coef = as.numeric(coefs[cat, vars]),
+      SE = as.numeric(ses[cat, vars])
+    )
+  }))
+  
+  dt[, IC_low := Coef - 1.96 * SE]
+  dt[, IC_high := Coef + 1.96 * SE]
+  dt
+}
+
+coef_ccaa <- extreu_coef_multinom("CCAA_f")
+
+labels_ccaa <- c(
+  "CCAA_f02" = "Aragó",
+  "CCAA_f03" = "Astúries",
+  "CCAA_f04" = "Illes Balears",
+  "CCAA_f05" = "Canàries",
+  "CCAA_f06" = "Cantàbria",
+  "CCAA_f07" = "Castella i Lleó",
+  "CCAA_f08" = "Castella-La Manxa",
+  "CCAA_f09" = "Catalunya",
+  "CCAA_f10" = "Comunitat Valenciana",
+  "CCAA_f11" = "Extremadura",
+  "CCAA_f12" = "Galícia",
+  "CCAA_f13" = "Madrid",
+  "CCAA_f14" = "Múrcia",
+  "CCAA_f15" = "Navarra",
+  "CCAA_f16" = "País Basc",
+  "CCAA_f17" = "La Rioja",
+  "CCAA_f51" = "Ceuta",
+  "CCAA_f52" = "Melilla"
+)
+
+coef_ccaa[, Variable_label := labels_ccaa[Variable]]
+coef_ccaa[is.na(Variable_label), Variable_label := Variable]
+
+coef_ccaa[, Resultat := factor(
+  Resultat,
+  levels = c("Infraqualificacio", "Sobrequalificacio"),
+  labels = c("Infraqualificació", "Sobrequalificació")
+)]
+
+g_ccaa <- ggplot(coef_ccaa, aes(x = Coef, y = reorder(Variable_label, Coef))) +
+  geom_vline(xintercept = 0, linetype = 2, color = "gray60") +
+  geom_errorbarh(aes(xmin = IC_low, xmax = IC_high), height = 0.2) +
+  geom_point(size = 2) +
+  facet_wrap(~ Resultat, scales = "free_y") +
+  labs(
+    title = "Coeficients territorials del model logit multinomial amb pesos",
+    subtitle = "Categoria de referència de la dependent: ajust",
+    x = "Coeficient estimat",
+    y = NULL
+  ) +
+  theme_minimal()
+
+print(g_ccaa)
+
+ggsave("multinom_coefplot_ccaa.jpg", g_ccaa, width = 11, height = 8, dpi = 300)
+```
+
+```{r}
+
+# 4) COEFPLOT DELS PERÍODES
+
+coef_periode <- extreu_coef_multinom("PERIODE_f")
+
+labels_periode <- c(
+  "PERIODE_fCrisi_2008_2013" = "Crisi (vs Recuperació)",
+  "PERIODE_fExpansio_2005_2007" = "Expansió (vs Recuperació)",
+  "PERIODE_fPandemia_Post_2020_2025" = "Pandèmia/post (vs Recuperació)"
+)
+
+coef_periode[, Variable_label := labels_periode[Variable]]
+
+coef_periode[, Resultat := factor(
+  Resultat,
+  levels = c("Infraqualificacio", "Sobrequalificacio"),
+  labels = c("Infraqualificació", "Sobrequalificació")
+)]
+
+g_periode_coef <- ggplot(coef_periode, aes(x = Coef, y = reorder(Variable_label, Coef))) +
+  geom_vline(xintercept = 0, linetype = 2, color = "gray60") +
+  geom_errorbarh(aes(xmin = IC_low, xmax = IC_high), height = 0.2) +
+  geom_point(size = 2) +
+  facet_wrap(~ Resultat, scales = "free_y") +
+  labs(
+    title = "Efecte dels períodes econòmics sobre el desajust educatiu",
+    subtitle = "Model logit multinomial amb pesos. Referència temporal: Recuperació 2014-2019",
+    x = "Coeficient estimat",
+    y = NULL
+  ) +
+  theme_minimal()
+
+print(g_periode_coef)
+
+ggsave("multinom_coefplot_periodes.jpg", g_periode_coef, width = 10, height = 5.5, dpi = 300)
+```
+
+```{r}
+
+# MODELS DE COMPARACIÓ + VISUAL DE ROBUSTESA
+
+
+library(data.table)
+library(ggplot2)
+
+setDT(base_multinom)
+
+
+# 1) VARIABLES BINÀRIES PER ALS MODELS DE COMPARACIÓ
+
+base_multinom[, infra_bin := ifelse(DESAJUST_f == "Infraqualificacio", 1, 0)]
+base_multinom[, sobre_bin := ifelse(DESAJUST_f == "Sobrequalificacio", 1, 0)]
+
+
+# 2) MODELS PROBIT AMB PESOS
+
+m_infra_probit_w <- glm(
+  infra_bin ~ dona + EDAT_c + EDAT_c2 + CCAA_f + PERIODE_f,
+  data = base_multinom,
+  family = binomial(link = "probit"),
+  weights = pes_reesc
+)
+
+m_sobre_probit_w <- glm(
+  sobre_bin ~ dona + EDAT_c + EDAT_c2 + CCAA_f + PERIODE_f,
+  data = base_multinom,
+  family = binomial(link = "probit"),
+  weights = pes_reesc
+)
+
+
+# 3) MODELS LOGIT AMB PESOS
+
+m_infra_logit_w <- glm(
+  infra_bin ~ dona + EDAT_c + EDAT_c2 + CCAA_f + PERIODE_f,
+  data = base_multinom,
+  family = binomial(link = "logit"),
+  weights = pes_reesc
+)
+
+m_sobre_logit_w <- glm(
+  sobre_bin ~ dona + EDAT_c + EDAT_c2 + CCAA_f + PERIODE_f,
+  data = base_multinom,
+  family = binomial(link = "logit"),
+  weights = pes_reesc
+)
+
+# Si vols comprovar-los
+summary(m_infra_probit_w)
+summary(m_sobre_probit_w)
+summary(m_infra_logit_w)
+summary(m_sobre_logit_w)
+
+
+# 4) FUNCIONS AUXILIARS PER CALCULAR EFECTES MARGINALS
+
+edat_mitjana <- mean(base_multinom$EDAT, na.rm = TRUE)
+
+pred_multinom_outcome <- function(model, data, outcome) {
+  probs <- as.data.table(as.matrix(predict(model, newdata = data, type = "probs")))
+  probs[[outcome]]
+}
+
+pred_binary <- function(model, data) {
+  as.numeric(predict(model, newdata = data, type = "response"))
+}
+
+# ----- efecte marginal de variable binària (ex: dona)
+ame_dummy_multinom <- function(model, data, var, outcome, weights_var = "pes_reesc") {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d0[, (var) := 0]
+  d1[, (var) := 1]
+  
+  p0 <- pred_multinom_outcome(model, d0, outcome)
+  p1 <- pred_multinom_outcome(model, d1, outcome)
+  
+  weighted.mean(p1 - p0, w = data[[weights_var]], na.rm = TRUE)
+}
+
+ame_dummy_binary <- function(model, data, var, weights_var = "pes_reesc") {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d0[, (var) := 0]
+  d1[, (var) := 1]
+  
+  p0 <- pred_binary(model, d0)
+  p1 <- pred_binary(model, d1)
+  
+  weighted.mean(p1 - p0, w = data[[weights_var]], na.rm = TRUE)
+}
+
+# ----- efecte marginal de l'edat
+ame_edat_multinom <- function(model, data, outcome, pas = 1, weights_var = "pes_reesc") {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d1[, EDAT := EDAT + pas]
+  d1[, EDAT_c := EDAT - edat_mitjana]
+  d1[, EDAT_c2 := EDAT_c^2]
+  
+  p0 <- pred_multinom_outcome(model, d0, outcome)
+  p1 <- pred_multinom_outcome(model, d1, outcome)
+  
+  weighted.mean((p1 - p0) / pas, w = data[[weights_var]], na.rm = TRUE)
+}
+
+ame_edat_binary <- function(model, data, pas = 1, weights_var = "pes_reesc") {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d1[, EDAT := EDAT + pas]
+  d1[, EDAT_c := EDAT - edat_mitjana]
+  d1[, EDAT_c2 := EDAT_c^2]
+  
+  p0 <- pred_binary(model, d0)
+  p1 <- pred_binary(model, d1)
+  
+  weighted.mean((p1 - p0) / pas, w = data[[weights_var]], na.rm = TRUE)
+}
+
+# ----- efecte marginal dels períodes vs Recuperació
+ame_periode_multinom <- function(model, data, periode_target, outcome,
+                                 periode_ref = "Recuperacio_2014_2019",
+                                 weights_var = "pes_reesc") {
+  d_ref <- copy(data)
+  d_tar <- copy(data)
+  
+  d_ref[, PERIODE_f := factor(periode_ref, levels = levels(data$PERIODE_f))]
+  d_tar[, PERIODE_f := factor(periode_target, levels = levels(data$PERIODE_f))]
+  
+  p_ref <- pred_multinom_outcome(model, d_ref, outcome)
+  p_tar <- pred_multinom_outcome(model, d_tar, outcome)
+  
+  weighted.mean(p_tar - p_ref, w = data[[weights_var]], na.rm = TRUE)
+}
+
+ame_periode_binary <- function(model, data, periode_target,
+                               periode_ref = "Recuperacio_2014_2019",
+                               weights_var = "pes_reesc") {
+  d_ref <- copy(data)
+  d_tar <- copy(data)
+  
+  d_ref[, PERIODE_f := factor(periode_ref, levels = levels(data$PERIODE_f))]
+  d_tar[, PERIODE_f := factor(periode_target, levels = levels(data$PERIODE_f))]
+  
+  p_ref <- pred_binary(model, d_ref)
+  p_tar <- pred_binary(model, d_tar)
+  
+  weighted.mean(p_tar - p_ref, w = data[[weights_var]], na.rm = TRUE)
+}
+
+
+# 5) TAULA D'EFECTES MARGINALS COMPARABLES
+
+rob_multinom <- rbindlist(list(
+  data.table(
+    Resultat = "Infraqualificació",
+    Variable = c("Dona", "Edat", "Crisi", "Expansió", "Pandèmia/post"),
+    AME = c(
+      ame_dummy_multinom(m_multinom_ref, base_multinom, "dona", "Infraqualificacio"),
+      ame_edat_multinom(m_multinom_ref, base_multinom, "Infraqualificacio"),
+      ame_periode_multinom(m_multinom_ref, base_multinom, "Crisi_2008_2013", "Infraqualificacio"),
+      ame_periode_multinom(m_multinom_ref, base_multinom, "Expansio_2005_2007", "Infraqualificacio"),
+      ame_periode_multinom(m_multinom_ref, base_multinom, "Pandemia_Post_2020_2025", "Infraqualificacio")
+    ),
+    Model = "Multinomial amb pesos"
+  ),
+  data.table(
+    Resultat = "Sobrequalificació",
+    Variable = c("Dona", "Edat", "Crisi", "Expansió", "Pandèmia/post"),
+    AME = c(
+      ame_dummy_multinom(m_multinom_ref, base_multinom, "dona", "Sobrequalificacio"),
+      ame_edat_multinom(m_multinom_ref, base_multinom, "Sobrequalificacio"),
+      ame_periode_multinom(m_multinom_ref, base_multinom, "Crisi_2008_2013", "Sobrequalificacio"),
+      ame_periode_multinom(m_multinom_ref, base_multinom, "Expansio_2005_2007", "Sobrequalificacio"),
+      ame_periode_multinom(m_multinom_ref, base_multinom, "Pandemia_Post_2020_2025", "Sobrequalificacio")
+    ),
+    Model = "Multinomial amb pesos"
+  )
+))
+
+rob_probit <- rbindlist(list(
+  data.table(
+    Resultat = "Infraqualificació",
+    Variable = c("Dona", "Edat", "Crisi", "Expansió", "Pandèmia/post"),
+    AME = c(
+      ame_dummy_binary(m_infra_probit_w, base_multinom, "dona"),
+      ame_edat_binary(m_infra_probit_w, base_multinom),
+      ame_periode_binary(m_infra_probit_w, base_multinom, "Crisi_2008_2013"),
+      ame_periode_binary(m_infra_probit_w, base_multinom, "Expansio_2005_2007"),
+      ame_periode_binary(m_infra_probit_w, base_multinom, "Pandemia_Post_2020_2025")
+    ),
+    Model = "Probit amb pesos"
+  ),
+  data.table(
+    Resultat = "Sobrequalificació",
+    Variable = c("Dona", "Edat", "Crisi", "Expansió", "Pandèmia/post"),
+    AME = c(
+      ame_dummy_binary(m_sobre_probit_w, base_multinom, "dona"),
+      ame_edat_binary(m_sobre_probit_w, base_multinom),
+      ame_periode_binary(m_sobre_probit_w, base_multinom, "Crisi_2008_2013"),
+      ame_periode_binary(m_sobre_probit_w, base_multinom, "Expansio_2005_2007"),
+      ame_periode_binary(m_sobre_probit_w, base_multinom, "Pandemia_Post_2020_2025")
+    ),
+    Model = "Probit amb pesos"
+  )
+))
+
+rob_logit <- rbindlist(list(
+  data.table(
+    Resultat = "Infraqualificació",
+    Variable = c("Dona", "Edat", "Crisi", "Expansió", "Pandèmia/post"),
+    AME = c(
+      ame_dummy_binary(m_infra_logit_w, base_multinom, "dona"),
+      ame_edat_binary(m_infra_logit_w, base_multinom),
+      ame_periode_binary(m_infra_logit_w, base_multinom, "Crisi_2008_2013"),
+      ame_periode_binary(m_infra_logit_w, base_multinom, "Expansio_2005_2007"),
+      ame_periode_binary(m_infra_logit_w, base_multinom, "Pandemia_Post_2020_2025")
+    ),
+    Model = "Logit amb pesos"
+  ),
+  data.table(
+    Resultat = "Sobrequalificació",
+    Variable = c("Dona", "Edat", "Crisi", "Expansió", "Pandèmia/post"),
+    AME = c(
+      ame_dummy_binary(m_sobre_logit_w, base_multinom, "dona"),
+      ame_edat_binary(m_sobre_logit_w, base_multinom),
+      ame_periode_binary(m_sobre_logit_w, base_multinom, "Crisi_2008_2013"),
+      ame_periode_binary(m_sobre_logit_w, base_multinom, "Expansio_2005_2007"),
+      ame_periode_binary(m_sobre_logit_w, base_multinom, "Pandemia_Post_2020_2025")
+    ),
+    Model = "Logit amb pesos"
+  )
+))
+
+rob_models <- rbindlist(list(rob_multinom, rob_probit, rob_logit), fill = TRUE)
+
+rob_models[, Variable := factor(
+  Variable,
+  levels = c("Pandèmia/post", "Expansió", "Crisi", "Dona", "Edat")
+)]
+
+rob_models[, Resultat := factor(
+  Resultat,
+  levels = c("Infraqualificació", "Sobrequalificació")
+)]
+
+rob_models[, Model := factor(
+  Model,
+  levels = c("Logit amb pesos", "Probit amb pesos", "Multinomial amb pesos")
+)]
+
+
+# 6) GRÀFIC FINAL DE COMPARACIÓ
+
+g_robustesa_final <- ggplot(
+  rob_models,
+  aes(x = AME, y = Variable, shape = Model)
+) +
+  geom_vline(xintercept = 0, linetype = 2, color = "gray60") +
+  geom_point(size = 3) +
+  facet_wrap(~ Resultat, scales = "free_x") +
+  labs(
+    title = "Comparació dels efectes marginals segons especificació",
+    subtitle = "Multinomial amb pesos, probit amb pesos i logit amb pesos",
+    x = "Efecte marginal mitjà",
+    y = NULL,
+    shape = NULL
+  ) +
+  theme_minimal()
+
+print(g_robustesa_final)
+
+ggsave(
+  "robustesa_models_multinom_probit_logit_pesos.jpg",
+  g_robustesa_final,
+  width = 10.5,
+  height = 5.8,
+  dpi = 300
+)
+```
+
+```{r}
+
+# GRÀFIC DE DIFERÈNCIES RESPECTE AL LOGIT
+
+
+library(data.table)
+library(ggplot2)
+
+rob_diff <- copy(rob_models)
+
+# Agafem l'AME del logit com a referència dins de cada Resultat + Variable
+rob_diff[, AME_logit := AME[Model == "Logit amb pesos"][1],
+         by = .(Resultat, Variable)]
+
+# Diferència respecte al logit
+rob_diff[, Diff_logit := AME - AME_logit]
+
+# En punts percentuals, més fàcil d'interpretar
+rob_diff[, Diff_logit_pp := Diff_logit * 100]
+
+# Traiem el logit perquè és la referència
+rob_diff <- rob_diff[Model != "Logit amb pesos"]
+
+rob_diff[, Model := droplevels(Model)]
+
+# ==================================================
+# GRÀFIC
+# ==================================================
+
+g_diff_models <- ggplot(
+  rob_diff,
+  aes(x = Diff_logit_pp, y = Variable, shape = Model)
+) +
+  geom_vline(xintercept = 0, linetype = 2, color = "gray60") +
+  geom_point(size = 3, position = position_dodge(width = 0.4)) +
+  facet_wrap(~ Resultat, scales = "free_x") +
+  labs(
+    title = "Diferències dels efectes marginals respecte al model logit",
+    subtitle = "Comparació del probit i el multinomial amb pesos",
+    x = "Diferència respecte al logit (punts percentuals)",
+    y = NULL,
+    shape = NULL
+  ) +
+  theme_minimal()
+
+print(g_diff_models)
+
+ggsave(
+  "diferencies_models_respecte_logit.jpg",
+  g_diff_models,
+  width = 10.5,
+  height = 5.8,
+  dpi = 300
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#2.Models amb pesos 
+#(procediment exactament igual que l'anterior però amb pesos)
+```{r}
+library(data.table)
+setDT(EPA_2005_2025v2)
+
+# 1) buscar variable d'edat exacta
+edat_var <- intersect(names(EPA_2005_2025v2), c("EDAT1", "EDAD1"))
+if (length(edat_var) == 0) stop("No trobo la variable EDAT1/EDAD1")
+edat_var <- edat_var[1]
+
+# 2) ordre de menor a major nivell educatiu
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# 3) base inicial: només ocupats i observacions útils 
+#(mateix criteri que models sense pesos)
+base_probit <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+  !is.na(AOI) &
+  trimws(as.character(AOI)) != "" &
+  sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # només ocupats
+  !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+  !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+  trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+  !is.na(ANY) &
+  !is.na(FACTOREL) &
+  !is.na(SEXO1) & trimws(as.character(SEXO1)) %in% c("1", "6") &
+  !is.na(CCAA) & trimws(as.character(CCAA)) != "",
+  .(
+    ANY,
+    FACTOREL,
+    NFORMA = trimws(as.character(NFORMA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    SEXO1 = trimws(as.character(SEXO1)),
+    CCAA = sprintf("%02d", as.integer(CCAA)),
+    ACT1 = trimws(as.character(ACT1)),
+    DUCON1 = trimws(as.character(DUCON1)),
+    PARCO1 = trimws(as.character(PARCO1)),
+    EDAT = suppressWarnings(as.numeric(as.character(get(edat_var))))
+  )
+]
+
+# 4) calcular la moda educativa per ocupació en tot el període 2005-2025
+moda <- base_probit[
+  ,
+  .(pes = sum(FACTOREL, na.rm = TRUE)),
+  by = .(OCUP1, NFORMA)
+]
+
+moda[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+# si hi ha empat, es queda amb la primera segons l'ordre educatiu
+moda_final <- moda[
+  order(OCUP1, -pes, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_final, "NFORMA", "NFORMA_MODA")
+
+# 5) unir la moda a cada observació
+base_probit[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_probit <- merge(
+  base_probit,
+  moda_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+# 6) construir variable de desajust
+base_probit[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificacio",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificacio"
+)]
+
+# 7) variables dependents binàries
+base_probit[, sobre := ifelse(DESAJUST_MODA == "Sobrequalificacio", 1, 0)]
+base_probit[, infra := ifelse(DESAJUST_MODA == "Infraqualificacio", 1, 0)]
+
+# 8) variables explicatives
+base_probit[, dona := ifelse(SEXO1 == "6", 1, 0)]
+base_probit[, CCAA_f := factor(CCAA)]
+base_probit[, ACT1_f := factor(ifelse(ACT1 == "", NA, ACT1))]
+base_probit[, DUCON1_f := factor(ifelse(DUCON1 == "", NA, DUCON1))]
+base_probit[, PARCO1_f := factor(ifelse(PARCO1 == "", NA, PARCO1))]
+
+# 9) base per al model bàsic
+base_basic <- base_probit[
+  !is.na(sobre) & !is.na(infra) &
+  !is.na(dona) & !is.na(EDAT) &
+  !is.na(CCAA_f) & !is.na(ANY) &
+  !is.na(FACTOREL)
+]
+
+# 10) centrar edat i any
+base_basic[, EDAT_c := EDAT - mean(EDAT, na.rm = TRUE)]
+base_basic[, EDAT_c2 := EDAT_c^2]
+base_basic[, ANY_c := ANY - mean(ANY, na.rm = TRUE)]
+
+# 11) pesos reescalats
+#pas clau del model!!!!!
+#dividim el factorel per la seva mitjana per evitar problemes de convergència i escala 
+base_basic[, pes_model := FACTOREL / mean(FACTOREL, na.rm = TRUE)]
+
+# 12) models bàsics amb pesos reescalats
+m_sobre_basic_w <- glm(
+  sobre ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+  family = binomial(link = "probit"),
+  data = base_basic,
+  weights = pes_model
+)
+
+m_infra_basic_w <- glm(
+  infra ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+  family = binomial(link = "probit"),
+  data = base_basic,
+  weights = pes_model
+)
+
+# 13) base per al model ampliat
+base_full <- base_basic[
+  !is.na(ACT1_f) & !is.na(DUCON1_f) & !is.na(PARCO1_f)
+]
+
+# 14) models ampliats amb pesos reescalats
+m_sobre_full_w <- glm(
+  sobre ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c + ACT1_f + DUCON1_f + PARCO1_f,
+  family = binomial(link = "probit"),
+  data = base_full,
+  weights = pes_model
+)
+
+m_infra_full_w <- glm(
+  infra ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c + ACT1_f + DUCON1_f + PARCO1_f,
+  family = binomial(link = "probit"),
+  data = base_full,
+  weights = pes_model
+)
+
+# 15) resultats
+summary(m_sobre_basic_w)
+summary(m_infra_basic_w)
+summary(m_sobre_full_w)
+summary(m_infra_full_w)
+
+# 16) coeficients sols
+coef(m_sobre_basic_w)
+coef(m_infra_basic_w)
+coef(m_sobre_full_w)
+coef(m_infra_full_w)
+
+# 17) mides de mostra
+nrow(base_basic)
+nrow(base_full)
+```
+
+#En aquest segon cop, també produim visuals per analitzar els models
+````{r}
+library(data.table)
+
+#Models a mostrar
+mod_infra <- m_infra_full
+mod_sobre <- m_sobre_full
+
+# variables a dibuixar
+keep_terms <- c("dona", "EDAT_c", "EDAT_c2", "ANY_c", "DUCON1_f6", "PARCO1_f6")
+
+labels <- c(
+  "dona" = "Dona",
+  "EDAT_c" = "Edat (centrada)",
+  "EDAT_c2" = "Edat²",
+  "ANY_c" = "Any (centrat)",
+  "DUCON1_f6" = "Contracte temporal",
+  "PARCO1_f6" = "Jornada parcial"
+)
+
+extreure_coefplot <- function(model, tipus_model){
+  cf <- coef(model)
+  se <- sqrt(diag(vcov(model)))
+  
+  dt <- data.table(
+    term = names(cf),
+    coef = as.numeric(cf),
+    se = as.numeric(se)
+  )
+  
+  dt <- dt[term %in% keep_terms]
+  dt[, low := coef - 1.96 * se]
+  dt[, high := coef + 1.96 * se]
+  dt[, variable := labels[term]]
+  dt[, model := tipus_model]
+  
+  dt[, .(variable, coef, low, high, model)]
+}
+
+coef_infra <- extreure_coefplot(mod_infra, "Infraqualificació")
+coef_sobre <- extreure_coefplot(mod_sobre, "Sobrequalificació")
+
+jpeg("coefplot_models_ampliats.jpg", width = 2200, height = 1200, res = 200)
+
+par(mfrow = c(1, 2), mar = c(7, 8, 4, 2), oma = c(0, 0, 2, 0))
+
+for(dt in list(coef_infra, coef_sobre)){
+  
+  dt <- copy(dt)
+  dt[, ypos := .I]
+  
+  xlim_comu <- range(c(dt$low, dt$high), na.rm = TRUE)
+  marge <- 0.1 * diff(xlim_comu)
+  xlim_comu <- c(xlim_comu[1] - marge, xlim_comu[2] + marge)
+  
+  plot(
+    dt$coef, dt$ypos,
+    xlim = xlim_comu,
+    ylim = c(0.5, nrow(dt) + 0.5),
+    pch = 19,
+    yaxt = "n",
+    xlab = "Coeficient estimat",
+    ylab = "",
+    main = unique(dt$model)
+  )
+  
+  segments(dt$low, dt$ypos, dt$high, dt$ypos, lwd = 2)
+  abline(v = 0, lty = 2, col = "gray40")
+  
+  axis(2, at = dt$ypos, labels = dt$variable, las = 2, cex.axis = 0.9)
+}
+
+mtext("Coeficients dels principals regressors als models ampliats", outer = TRUE, cex = 1.3)
+
+dev.off()
+````
+
+````{r}
+library(data.table)
+
+# models ampliats
+mod_infra <- m_infra_full
+mod_sobre <- m_sobre_full
+
+# edats per predir
+edats <- seq(
+  floor(min(base_full$EDAT, na.rm = TRUE)),
+  ceiling(max(base_full$EDAT, na.rm = TRUE)),
+  by = 1
+)
+
+# valors de referència
+ccaa_ref   <- levels(base_full$CCAA_f)[1]
+act1_ref   <- levels(base_full$ACT1_f)[1]
+ducon_ref  <- levels(base_full$DUCON1_f)[1]
+parco_ref  <- levels(base_full$PARCO1_f)[1]
+
+edat_mean <- mean(base_full$EDAT, na.rm = TRUE)
+
+# base de predicció
+pred_data <- rbindlist(list(
+  data.table(
+    dona = 0,
+    EDAT = edats
+  ),
+  data.table(
+    dona = 1,
+    EDAT = edats
+  )
+))
+
+pred_data[, sexe_lab := ifelse(dona == 0, "Homes", "Dones")]
+pred_data[, EDAT_c := EDAT - edat_mean]
+pred_data[, EDAT_c2 := EDAT_c^2]
+pred_data[, ANY_c := 0]
+pred_data[, CCAA_f := factor(ccaa_ref, levels = levels(base_full$CCAA_f))]
+pred_data[, ACT1_f := factor(act1_ref, levels = levels(base_full$ACT1_f))]
+pred_data[, DUCON1_f := factor(ducon_ref, levels = levels(base_full$DUCON1_f))]
+pred_data[, PARCO1_f := factor(parco_ref, levels = levels(base_full$PARCO1_f))]
+
+# prediccions
+pred_data[, p_infra := predict(mod_infra, newdata = pred_data, type = "response")]
+pred_data[, p_sobre := predict(mod_sobre, newdata = pred_data, type = "response")]
+
+jpeg("probabilitats_predides_edat_sexe.jpg", width = 2200, height = 1200, res = 200)
+
+par(mfrow = c(1, 2), mar = c(5, 5, 4, 2), oma = c(0, 0, 2, 0))
+
+sub_h <- pred_data[sexe_lab == "Homes"]
+sub_d <- pred_data[sexe_lab == "Dones"]
+
+# Infra
+ylim_infra <- range(pred_data$p_infra, na.rm = TRUE)
+
+plot(
+  sub_h$EDAT, sub_h$p_infra,
+  type = "l",
+  lwd = 2,
+  ylim = ylim_infra,
+  xlab = "Edat",
+  ylab = "Probabilitat predida",
+  main = "Infraqualificació"
+)
+lines(sub_d$EDAT, sub_d$p_infra, lwd = 2, lty = 2)
+legend("topleft", legend = c("Homes", "Dones"), lwd = 2, lty = c(1, 2), bty = "n")
+
+# Sobre
+ylim_sobre <- range(pred_data$p_sobre, na.rm = TRUE)
+
+plot(
+  sub_h$EDAT, sub_h$p_sobre,
+  type = "l",
+  lwd = 2,
+  ylim = ylim_sobre,
+  xlab = "Edat",
+  ylab = "Probabilitat predida",
+  main = "Sobrequalificació"
+)
+lines(sub_d$EDAT, sub_d$p_sobre, lwd = 2, lty = 2)
+legend("topright", legend = c("Homes", "Dones"), lwd = 2, lty = c(1, 2), bty = "n")
+
+mtext("Probabilitats predides segons edat i sexe", outer = TRUE, cex = 1.3)
+
+dev.off()
+````
+
+````{r}
+library(data.table)
+
+# funció per calcular AME d'una dummy (0/1)
+ame_dummy <- function(model, data, var){
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d0[[var]] <- 0
+  d1[[var]] <- 1
+  
+  p0 <- predict(model, newdata = d0, type = "response")
+  p1 <- predict(model, newdata = d1, type = "response")
+  
+  ame_i <- p1 - p0
+  
+  ame <- mean(ame_i, na.rm = TRUE)
+  se  <- sd(ame_i, na.rm = TRUE) / sqrt(sum(!is.na(ame_i)))
+  
+  data.table(
+    variable = var,
+    ame = ame,
+    low = ame - 1.96 * se,
+    high = ame + 1.96 * se
+  )
+}
+
+# funció per calcular AME d'una continua
+ame_cont <- function(model, data, var, delta = 1){
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d1[[var]] <- d1[[var]] + delta
+  
+  # si edat centrada, actualizar també edat²
+  if (var == "EDAT_c" && "EDAT_c2" %in% names(d1)) {
+    d1[["EDAT_c2"]] <- d1[["EDAT_c"]]^2
+  }
+  
+  p0 <- predict(model, newdata = d0, type = "response")
+  p1 <- predict(model, newdata = d1, type = "response")
+  
+  ame_i <- (p1 - p0) / delta
+  
+  ame <- mean(ame_i, na.rm = TRUE)
+  se  <- sd(ame_i, na.rm = TRUE) / sqrt(sum(!is.na(ame_i)))
+  
+  data.table(
+    variable = var,
+    ame = ame,
+    low = ame - 1.96 * se,
+    high = ame + 1.96 * se
+  )
+}
+
+# models ampliats
+mod_infra <- m_infra_full
+mod_sobre <- m_sobre_full
+
+# dades de referència
+dat_infra <- copy(base_full)
+dat_sobre <- copy(base_full)
+
+# calcular AME per infra
+ame_infra <- rbindlist(list(
+  ame_dummy(mod_infra, dat_infra, "dona"),
+  ame_cont(mod_infra, dat_infra, "EDAT_c"),
+  ame_cont(mod_infra, dat_infra, "ANY_c"),
+  ame_dummy(mod_infra, dat_infra, "DUCON1_f6"),
+  ame_dummy(mod_infra, dat_infra, "PARCO1_f6")
+), use.names = TRUE, fill = TRUE)
+
+ame_infra[, model := "Infraqualificació"]
+
+# calcular AME per sobre
+ame_sobre <- rbindlist(list(
+  ame_dummy(mod_sobre, dat_sobre, "dona"),
+  ame_cont(mod_sobre, dat_sobre, "EDAT_c"),
+  ame_cont(mod_sobre, dat_sobre, "ANY_c"),
+  ame_dummy(mod_sobre, dat_sobre, "DUCON1_f6"),
+  ame_dummy(mod_sobre, dat_sobre, "PARCO1_f6")
+), use.names = TRUE, fill = TRUE)
+
+ame_sobre[, model := "Sobrequalificació"]
+
+# unir
+ame_all <- rbindlist(list(ame_infra, ame_sobre), use.names = TRUE, fill = TRUE)
+
+# etiquetes 
+labels <- c(
+  "dona" = "Dona",
+  "EDAT_c" = "Edat",
+  "ANY_c" = "Any",
+  "DUCON1_f6" = "Contracte temporal",
+  "PARCO1_f6" = "Jornada parcial"
+)
+
+ame_all[, variable_lab := labels[variable]]
+
+# ordre de variables
+ordre_vars <- c("Dona", "Edat", "Any", "Contracte temporal", "Jornada parcial")
+ame_all[, variable_lab := factor(variable_lab, levels = ordre_vars)]
+
+jpeg("ame_models_ampliats.jpg", width = 2200, height = 1200, res = 200)
+
+par(mfrow = c(1, 2), mar = c(7, 8, 4, 2), oma = c(0, 0, 2, 0))
+
+for(mod in c("Infraqualificació", "Sobrequalificació")){
+  
+  dt <- copy(ame_all[model == mod])
+  dt <- dt[order(variable_lab)]
+  dt[, ypos := .I]
+  
+  xlim_comu <- range(c(dt$low, dt$high), na.rm = TRUE)
+  marge <- 0.15 * diff(xlim_comu)
+  xlim_comu <- c(xlim_comu[1] - marge, xlim_comu[2] + marge)
+  
+  plot(
+    dt$ame, dt$ypos,
+    xlim = xlim_comu,
+    ylim = c(0.5, nrow(dt) + 0.5),
+    pch = 19,
+    yaxt = "n",
+    xlab = "Efecte marginal mitjà",
+    ylab = "",
+    main = mod
+  )
+  
+  segments(dt$low, dt$ypos, dt$high, dt$ypos, lwd = 2)
+  abline(v = 0, lty = 2, col = "gray40")
+  
+  axis(2, at = dt$ypos, labels = dt$variable_lab, las = 2, cex.axis = 0.9)
+}
+
+mtext("Efectes marginals mitjans dels principals regressors", outer = TRUE, cex = 1.3)
+
+dev.off()
+````
+
+#model logit 
+````{r}
+# MODELS LOGIT SENSE PESOS
+
+# 1) model logit bàsic de sobrequalificació
+m_sobre_basic_logit <- glm(
+  sobre ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+  family = binomial(link = "logit"),
+  data = base_basic
+)
+
+# 2) model logit bàsic d'infraqualificació
+m_infra_basic_logit <- glm(
+  infra ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+  family = binomial(link = "logit"),
+  data = base_basic
+)
+
+# 3) model logit ampliat de sobrequalificació
+m_sobre_full_logit <- glm(
+  sobre ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c + ACT1_f + DUCON1_f + PARCO1_f,
+  family = binomial(link = "logit"),
+  data = base_full
+)
+
+# 4) model logit ampliat d'infraqualificació
+m_infra_full_logit <- glm(
+  infra ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c + ACT1_f + DUCON1_f + PARCO1_f,
+  family = binomial(link = "logit"),
+  data = base_full
+)
+
+# RESULTATS
+summary(m_sobre_basic_logit)
+summary(m_infra_basic_logit)
+summary(m_sobre_full_logit)
+summary(m_infra_full_logit)
+
+# COEFICIENTS SOLS
+coef(m_sobre_basic_logit)
+coef(m_infra_basic_logit)
+coef(m_sobre_full_logit)
+coef(m_infra_full_logit)
+
+# AIC
+AIC(m_sobre_basic_logit)
+AIC(m_infra_basic_logit)
+AIC(m_sobre_full_logit)
+AIC(m_infra_full_logit)
+````
+
+```{r}
+library(data.table)
+
+# variables a mostrar
+keep_terms <- c("dona", "EDAT_c", "EDAT_c2", "ANY_c", "DUCON1_f6", "PARCO1_f6")
+
+# noms 
+labels <- c(
+  "dona" = "Dona",
+  "EDAT_c" = "Edat (centrada)",
+  "EDAT_c2" = "Edat²",
+  "ANY_c" = "Any (centrat)",
+  "DUCON1_f6" = "Contracte temporal",
+  "PARCO1_f6" = "Jornada parcial"
+)
+
+# funció per extreure resultats d'un model
+extreure_model <- function(model, nom_columna, keep_terms, labels){
+  
+  coefs <- as.data.table(summary(model)$coefficients, keep.rownames = "Variable")
+  
+  setnames(
+    coefs,
+    c("Variable", "Estimate", "Std. Error", "z value", "Pr(>|z|)"),
+    c("Variable", "Coef", "SE", "z", "p")
+  )
+  
+  coefs <- coefs[Variable %in% keep_terms]
+  
+  coefs[, stars := fcase(
+    p < 0.001, "***",
+    p < 0.01,  "**",
+    p < 0.05,  "*",
+    p < 0.1,   ".",
+    default = ""
+  )]
+  
+  coefs[, Variable := labels[Variable]]
+  coefs[, valor := sprintf("%.3f%s\n(%.3f)", Coef, stars, SE)]
+  
+  coefs[, .(Variable, valor)]
+  setnames(coefs, "valor", nom_columna)
+  
+  return(coefs)
+}
+
+# --------- TRIA AQUÍ ELS DOS MODELS A COMPARAR ---------
+# Exemple 1: sobre ampliat
+taula_probit <- extreure_model(m_sobre_full, "Probit", keep_terms, labels)
+taula_logit  <- extreure_model(m_sobre_full_logit, "Logit", keep_terms, labels)
+
+# Si vols comparar un altre parell, substitueix per:
+# m_sobre_basic i m_sobre_basic_logit
+# m_infra_basic i m_infra_basic_logit
+# m_infra_full  i m_infra_full_logit
+# --------------------------------------------------------
+
+# unir les dues columnes
+taula_compare <- merge(taula_probit, taula_logit, by = "Variable", all = TRUE)
+
+# assegurar ordre de files
+ordre_files <- c(
+  "Dona",
+  "Edat (centrada)",
+  "Edat²",
+  "Any (centrat)",
+  "Contracte temporal",
+  "Jornada parcial"
+)
+
+taula_base <- data.table(Variable = ordre_files)
+taula_compare <- merge(taula_base, taula_compare, by = "Variable", all.x = TRUE, sort = FALSE)
+taula_compare[is.na(taula_compare)] <- ""
+
+print(taula_compare)
+View(taula_compare)
+```
+
+#extra
+```{r}
+# valor de referència per a CCAA
+ccaa_ref <- levels(base_basic$CCAA_f)[1]
+
+# seqüència d'edats
+x_edat <- seq(
+  floor(min(base_basic$EDAT, na.rm = TRUE)),
+  ceiling(max(base_basic$EDAT, na.rm = TRUE)),
+  by = 1
+)
+
+# mitjana d'edat per centrar
+edat_mean <- mean(base_basic$EDAT, na.rm = TRUE)
+
+# ---------- GRÀFIC 1: SOBREQUALIFICACIÓ ----------
+
+plot(
+  x = base_basic$EDAT,
+  y = jitter(base_basic$sobre, amount = 0.05),
+  main = "Model probit de la probabilitat de sobrequalificació segons l'edat",
+  xlab = "Edat",
+  ylab = "Sobrequalificació",
+  pch = 20,
+  ylim = c(-0.2, 1.2),
+  cex.main = 0.9,
+  col = rgb(0, 0, 0, 0.25)
+)
+
+# línies horitzontals
+abline(h = 1, lty = 2, col = "darkred")
+abline(h = 0, lty = 2, col = "darkred")
+
+text(60, 1.08, cex = 0.8, "Sobrequalificat")
+text(60, -0.08, cex = 0.8, "No sobrequalificat")
+
+# dades per predicció (perfil de referència)
+newdata_sobre <- data.frame(
+  dona = 0,
+  EDAT_c = x_edat - edat_mean,
+  EDAT_c2 = (x_edat - edat_mean)^2,
+  CCAA_f = factor(ccaa_ref, levels = levels(base_basic$CCAA_f)),
+  ANY_c = 0
+)
+
+# probabilitats predides
+y_sobre <- predict(m_sobre_basic, newdata = newdata_sobre, type = "response")
+
+# línia estimada
+lines(x_edat, y_sobre, lwd = 2, col = "steelblue")
+
+
+# ---------- GRÀFIC 2: INFRAQUALIFICACIÓ ----------
+
+plot(
+  x = base_basic$EDAT,
+  y = jitter(base_basic$infra, amount = 0.05),
+  main = "Model probit de la probabilitat d'infraqualificació segons l'edat",
+  xlab = "Edat",
+  ylab = "Infraqualificació",
+  pch = 20,
+  ylim = c(-0.2, 1.2),
+  cex.main = 0.9,
+  col = rgb(0, 0, 0, 0.25)
+)
+
+# línies horitzontals
+abline(h = 1, lty = 2, col = "darkred")
+abline(h = 0, lty = 2, col = "darkred")
+
+text(60, 1.08, cex = 0.8, "Infraqualificat")
+text(60, -0.08, cex = 0.8, "No infraqualificat")
+
+# dades per predicció
+newdata_infra <- data.frame(
+  dona = 0,
+  EDAT_c = x_edat - edat_mean,
+  EDAT_c2 = (x_edat - edat_mean)^2,
+  CCAA_f = factor(ccaa_ref, levels = levels(base_basic$CCAA_f)),
+  ANY_c = 0
+)
+
+# probabilitats predides
+y_infra <- predict(m_infra_basic, newdata = newdata_infra, type = "response")
+
+# línia estimada
+lines(x_edat, y_infra, lwd = 2, col = "steelblue")
+```
+
+```{r}
+library(data.table)
+
+# noms de les CCAA
+noms_ccaa <- c(
+  "01" = "Andalusia",
+  "02" = "Aragó",
+  "03" = "Astúries",
+  "04" = "Illes Balears",
+  "05" = "Canàries",
+  "06" = "Cantàbria",
+  "07" = "Castella i Lleó",
+  "08" = "Castella-La Manxa",
+  "09" = "Catalunya",
+  "10" = "Comunitat Valenciana",
+  "11" = "Extremadura",
+  "12" = "Galícia",
+  "13" = "Madrid",
+  "14" = "Múrcia",
+  "15" = "Navarra",
+  "16" = "País Basc",
+  "17" = "La Rioja",
+  "51" = "Ceuta",
+  "52" = "Melilla"
+)
+
+grafic_model_basic <- function(model, data, titol_general, ylab_prob = "Probabilitat predida") {
+  
+  ccaa_levels <- levels(data$CCAA_f)
+  ccaa_ref <- ccaa_levels[1]
+  
+  any_mean <- mean(data$ANY, na.rm = TRUE)
+  edat_mean <- mean(data$EDAT, na.rm = TRUE)
+  
+  anys <- seq(min(data$ANY, na.rm = TRUE), max(data$ANY, na.rm = TRUE), by = 1)
+  edats <- seq(floor(min(data$EDAT, na.rm = TRUE)), ceiling(max(data$EDAT, na.rm = TRUE)), by = 1)
+  
+  # 1) DONA
+  pred_dona <- data.table(
+    grup = c("Home", "Dona"),
+    dona = c(0, 1),
+    EDAT_c = 0,
+    EDAT_c2 = 0,
+    CCAA_f = factor(ccaa_ref, levels = ccaa_levels),
+    ANY_c = 0
+  )
+  
+  pred_dona[, p := predict(model, newdata = pred_dona, type = "response")]
+  
+  # 2) ANY_c
+  pred_any <- data.table(
+    ANY = anys,
+    dona = 0,
+    EDAT_c = 0,
+    EDAT_c2 = 0,
+    CCAA_f = factor(ccaa_ref, levels = ccaa_levels)
+  )
+  
+  pred_any[, ANY_c := ANY - any_mean]
+  pred_any[, p := predict(model, newdata = pred_any, type = "response")]
+  
+  # 3) EDAT (representa EDAT_c i EDAT_c2 correctament)
+  pred_edat <- data.table(
+    EDAT = edats,
+    dona = 0,
+    CCAA_f = factor(ccaa_ref, levels = ccaa_levels),
+    ANY_c = 0
+  )
+  
+  pred_edat[, EDAT_c := EDAT - edat_mean]
+  pred_edat[, EDAT_c2 := EDAT_c^2]
+  pred_edat[, p := predict(model, newdata = pred_edat, type = "response")]
+  
+  # 4) CCAA mínima i màxima
+  pred_ccaa <- data.table(
+    CCAA_f = factor(ccaa_levels, levels = ccaa_levels),
+    dona = 0,
+    EDAT_c = 0,
+    EDAT_c2 = 0,
+    ANY_c = 0
+  )
+  
+  pred_ccaa[, p := predict(model, newdata = pred_ccaa, type = "response")]
+  pred_ccaa[, CCAA := noms_ccaa[as.character(CCAA_f)]]
+  
+  ccaa_min <- pred_ccaa[which.min(p)]
+  ccaa_max <- pred_ccaa[which.max(p)]
+  pred_ccaa_ext <- rbind(ccaa_min, ccaa_max)
+  
+  # gràfics
+  par(mfrow = c(2, 2), mar = c(5, 5, 4, 2), oma = c(0, 0, 2, 0))
+  
+  # dona
+  bp1 <- barplot(
+    pred_dona$p,
+    names.arg = pred_dona$grup,
+    ylim = c(0, max(pred_dona$p) * 1.25),
+    ylab = ylab_prob,
+    main = "Efecte de dona"
+  )
+  text(bp1, pred_dona$p, labels = round(pred_dona$p, 3), pos = 3)
+  
+  # any
+  plot(
+    pred_any$ANY, pred_any$p,
+    type = "l",
+    lwd = 2,
+    xlab = "Any",
+    ylab = ylab_prob,
+    main = "Efecte de l'any"
+  )
+  
+  # edat
+  plot(
+    pred_edat$EDAT, pred_edat$p,
+    type = "l",
+    lwd = 2,
+    xlab = "Edat",
+    ylab = ylab_prob,
+    main = "Efecte de l'edat"
+  )
+  
+  # CCAA extrema
+  bp2 <- barplot(
+    pred_ccaa_ext$p,
+    names.arg = pred_ccaa_ext$CCAA,
+    ylim = c(0, max(pred_ccaa_ext$p) * 1.25),
+    ylab = ylab_prob,
+    main = "CCAA mínima i màxima",
+    las = 2
+  )
+  text(bp2, pred_ccaa_ext$p, labels = round(pred_ccaa_ext$p, 3), pos = 3, cex = 0.9)
+  
+  mtext(titol_general, outer = TRUE, cex = 1.2)
+}
+
+# -------- EXECUCIÓ --------
+
+# per al model bàsic de sobrequalificació
+grafic_model_basic(
+  model = m_sobre_basic,
+  data = base_basic,
+  titol_general = "Visualització del model probit bàsic de sobrequalificació"
+)
+
+# per al model bàsic d'infraqualificació
+grafic_model_basic(
+  model = m_infra_basic,
+  data = base_basic,
+  titol_general = "Visualització del model probit bàsic d'infraqualificació"
+)
+```
+
+```{r}
+library(data.table)
+
+# noms de les CCAA
+noms_ccaa <- c(
+  "01" = "Andalusia",
+  "02" = "Aragó",
+  "03" = "Astúries",
+  "04" = "Illes Balears",
+  "05" = "Canàries",
+  "06" = "Cantàbria",
+  "07" = "Castella i Lleó",
+  "08" = "Castella-La Manxa",
+  "09" = "Catalunya",
+  "10" = "Comunitat Valenciana",
+  "11" = "Extremadura",
+  "12" = "Galícia",
+  "13" = "Madrid",
+  "14" = "Múrcia",
+  "15" = "Navarra",
+  "16" = "País Basc",
+  "17" = "La Rioja",
+  "51" = "Ceuta",
+  "52" = "Melilla"
+)
+
+# funció per trobar la moda d'una variable
+moda_valor <- function(x){
+  ux <- na.omit(x)
+  names(sort(table(ux), decreasing = TRUE))[1]
+}
+
+# ---- TRIAR MODEL ----
+model_ccaa <- m_sobre_full
+titol_grafic <- "Probabilitat predida de sobrequalificació per CCAA"
+
+# si el vols per infraqualificació, canvia només això:
+# model_ccaa <- m_infra_full
+# titol_grafic <- "Probabilitat predida d'infraqualificació per CCAA"
+
+# valors de referència
+edat_mean <- mean(base_full$EDAT, na.rm = TRUE)
+any_mean  <- mean(base_full$ANY, na.rm = TRUE)
+
+act1_ref  <- moda_valor(base_full$ACT1_f)
+ducon_ref <- moda_valor(base_full$DUCON1_f)
+parco_ref <- moda_valor(base_full$PARCO1_f)
+
+# base de predicció: una fila per CCAA
+pred_ccaa <- data.table(
+  CCAA_f = factor(levels(base_full$CCAA_f), levels = levels(base_full$CCAA_f)),
+  dona = 0,
+  EDAT = edat_mean,
+  ANY = any_mean,
+  ACT1_f = factor(act1_ref, levels = levels(base_full$ACT1_f)),
+  DUCON1_f = factor(ducon_ref, levels = levels(base_full$DUCON1_f)),
+  PARCO1_f = factor(parco_ref, levels = levels(base_full$PARCO1_f))
+)
+
+# variables centrades
+pred_ccaa[, EDAT_c := EDAT - edat_mean]
+pred_ccaa[, EDAT_c2 := EDAT_c^2]
+pred_ccaa[, ANY_c := ANY - any_mean]
+
+# prediccions
+pred_ccaa[, p := predict(model_ccaa, newdata = pred_ccaa, type = "response")]
+pred_ccaa[, codi := as.character(CCAA_f)]
+pred_ccaa[, CCAA := noms_ccaa[codi]]
+
+# ordenar de menor a major probabilitat
+pred_ccaa <- pred_ccaa[order(p)]
+pred_ccaa[, ypos := 1:.N]
+
+# marcar extrems
+pred_ccaa[, color := "gray40"]
+pred_ccaa[1:3, color := "firebrick3"]
+pred_ccaa[(.N-2):.N, color := "darkgreen"]
+
+jpeg("grafic_totes_ccaa_model.jpg", width = 2200, height = 1600, res = 200)
+
+par(mar = c(5, 14, 4, 2))
+
+plot(
+  pred_ccaa$p, pred_ccaa$ypos,
+  pch = 19,
+  col = pred_ccaa$color,
+  xlim = c(0, max(pred_ccaa$p) * 1.15),
+  yaxt = "n",
+  ylab = "",
+  xlab = "Probabilitat predida",
+  main = titol_grafic
+)
+
+segments(
+  x0 = 0, y0 = pred_ccaa$ypos,
+  x1 = pred_ccaa$p, y1 = pred_ccaa$ypos,
+  col = "gray75"
+)
+
+points(pred_ccaa$p, pred_ccaa$ypos, pch = 19, col = pred_ccaa$color, cex = 1.1)
+
+axis(2, at = pred_ccaa$ypos, labels = pred_ccaa$CCAA, las = 2, cex.axis = 0.85)
+
+text(
+  x = pred_ccaa$p,
+  y = pred_ccaa$ypos,
+  labels = round(pred_ccaa$p, 3),
+  pos = 4,
+  cex = 0.75
+)
+
+legend(
+  "bottomright",
+  legend = c("3 probabilitats més baixes", "Altres CCAA", "3 probabilitats més altes"),
+  col = c("firebrick3", "gray40", "darkgreen"),
+  pch = 19,
+  bty = "n",
+  cex = 0.9
+)
+
+dev.off()
+```
+
+```{r}
+library(data.table)
+
+# noms de les CCAA
+noms_ccaa <- c(
+  "01" = "Andalusia",
+  "02" = "Aragó",
+  "03" = "Astúries",
+  "04" = "Illes Balears",
+  "05" = "Canàries",
+  "06" = "Cantàbria",
+  "07" = "Castella i Lleó",
+  "08" = "Castella-La Manxa",
+  "09" = "Catalunya",
+  "10" = "Comunitat Valenciana",
+  "11" = "Extremadura",
+  "12" = "Galícia",
+  "13" = "Madrid",
+  "14" = "Múrcia",
+  "15" = "Navarra",
+  "16" = "País Basc",
+  "17" = "La Rioja",
+  "51" = "Ceuta",
+  "52" = "Melilla"
+)
+
+# funció per trobar la moda d'una variable
+moda_valor <- function(x){
+  ux <- na.omit(x)
+  names(sort(table(ux), decreasing = TRUE))[1]
+}
+
+# ---- TRIAR MODEL ----
+model_ccaa <- m_sobre_full
+titol_grafic <- "Probabilitat predida de sobrequalificació per CCAA"
+
+# si el vols per infraqualificació, canvia només això:
+# model_ccaa <- m_infra_full
+# titol_grafic <- "Probabilitat predida d'infraqualificació per CCAA"
+
+# valors de referència
+edat_mean <- mean(base_full$EDAT, na.rm = TRUE)
+any_mean  <- mean(base_full$ANY, na.rm = TRUE)
+
+act1_ref  <- moda_valor(base_full$ACT1_f)
+ducon_ref <- moda_valor(base_full$DUCON1_f)
+parco_ref <- moda_valor(base_full$PARCO1_f)
+
+# base de predicció: una fila per CCAA
+pred_ccaa <- data.table(
+  CCAA_f = factor(levels(base_full$CCAA_f), levels = levels(base_full$CCAA_f)),
+  dona = 0,
+  EDAT = edat_mean,
+  ANY = any_mean,
+  ACT1_f = factor(act1_ref, levels = levels(base_full$ACT1_f)),
+  DUCON1_f = factor(ducon_ref, levels = levels(base_full$DUCON1_f)),
+  PARCO1_f = factor(parco_ref, levels = levels(base_full$PARCO1_f))
+)
+
+# variables centrades
+pred_ccaa[, EDAT_c := EDAT - edat_mean]
+pred_ccaa[, EDAT_c2 := EDAT_c^2]
+pred_ccaa[, ANY_c := ANY - any_mean]
+
+# prediccions
+pred_ccaa[, p := predict(model_ccaa, newdata = pred_ccaa, type = "response")]
+pred_ccaa[, codi := as.character(CCAA_f)]
+pred_ccaa[, CCAA := noms_ccaa[codi]]
+
+# ordenar de menor a major probabilitat
+pred_ccaa <- pred_ccaa[order(p)]
+pred_ccaa[, ypos := 1:.N]
+
+# marcar extrems
+pred_ccaa[, color := "gray40"]
+pred_ccaa[1:3, color := "firebrick3"]
+pred_ccaa[(.N-2):.N, color := "darkgreen"]
+
+jpeg("grafic_totes_ccaa_model.jpg", width = 2200, height = 1600, res = 200)
+
+par(mar = c(5, 14, 4, 2))
+
+plot(
+  pred_ccaa$p, pred_ccaa$ypos,
+  pch = 19,
+  col = pred_ccaa$color,
+  xlim = c(0, max(pred_ccaa$p) * 1.15),
+  yaxt = "n",
+  ylab = "",
+  xlab = "Probabilitat predida",
+  main = titol_grafic
+)
+
+segments(
+  x0 = 0, y0 = pred_ccaa$ypos,
+  x1 = pred_ccaa$p, y1 = pred_ccaa$ypos,
+  col = "gray75"
+)
+
+points(pred_ccaa$p, pred_ccaa$ypos, pch = 19, col = pred_ccaa$color, cex = 1.1)
+
+axis(2, at = pred_ccaa$ypos, labels = pred_ccaa$CCAA, las = 2, cex.axis = 0.85)
+
+text(
+  x = pred_ccaa$p,
+  y = pred_ccaa$ypos,
+  labels = round(pred_ccaa$p, 3),
+  pos = 4,
+  cex = 0.75
+)
+
+legend(
+  "bottomright",
+  legend = c("3 probabilitats més baixes", "Altres CCAA", "3 probabilitats més altes"),
+  col = c("firebrick3", "gray40", "darkgreen"),
+  pch = 19,
+  bty = "n",
+  cex = 0.9
+)
+
+dev.off() 
+```
+
+```{r}
+library(data.table)
+mod_infra_w <- m_infra_full_w
+mod_sobre_w <- m_sobre_full_w
+
+# Rango de edades
+edats <- seq(
+  floor(min(base_full$EDAT, na.rm = TRUE)),
+  ceiling(max(base_full$EDAT, na.rm = TRUE)),
+  by = 1
+)
+
+# Valores de referencia
+ccaa_ref  <- levels(base_full$CCAA_f)[1]
+act1_ref  <- levels(base_full$ACT1_f)[1]
+ducon_ref <- levels(base_full$DUCON1_f)[1]
+parco_ref <- levels(base_full$PARCO1_f)[1]
+
+edat_mean <- mean(base_full$EDAT, na.rm = TRUE)
+
+# Base de predicción
+pred_data <- rbindlist(list(
+  data.table(dona = 0, EDAT = edats),
+  data.table(dona = 1, EDAT = edats)
+))
+
+pred_data[, sexe_lab := ifelse(dona == 0, "Homes", "Dones")]
+pred_data[, EDAT_c := EDAT - edat_mean]
+pred_data[, EDAT_c2 := EDAT_c^2]
+pred_data[, ANY_c := 0]
+
+pred_data[, CCAA_f := factor(ccaa_ref, levels = levels(base_full$CCAA_f))]
+pred_data[, ACT1_f := factor(act1_ref, levels = levels(base_full$ACT1_f))]
+pred_data[, DUCON1_f := factor(ducon_ref, levels = levels(base_full$DUCON1_f))]
+pred_data[, PARCO1_f := factor(parco_ref, levels = levels(base_full$PARCO1_f))]
+
+# Predicciones
+pred_data[, p_infra := predict(mod_infra_w, newdata = pred_data, type = "response")]
+pred_data[, p_sobre := predict(mod_sobre_w, newdata = pred_data, type = "response")]
+
+jpeg("02_probabilitats_predides_edat_sexe_pesos.jpg", width = 2200, height = 1200, res = 200)
+
+par(mfrow = c(1, 2), mar = c(5, 5, 4, 2), oma = c(0, 0, 2, 0))
+
+sub_h <- pred_data[sexe_lab == "Homes"]
+sub_d <- pred_data[sexe_lab == "Dones"]
+
+# Infraqualificación
+ylim_infra <- range(pred_data$p_infra, na.rm = TRUE)
+
+plot(
+  sub_h$EDAT, sub_h$p_infra,
+  type = "l",
+  lwd = 2,
+  ylim = ylim_infra,
+  xlab = "Edad",
+  ylab = "Probabilidad predicha",
+  main = "Infraqualificació"
+)
+lines(sub_d$EDAT, sub_d$p_infra, lwd = 2, lty = 2)
+legend("topleft", legend = c("Homes", "Dones"), lwd = 2, lty = c(1, 2), bty = "n")
+
+# Sobrecualificación
+ylim_sobre <- range(pred_data$p_sobre, na.rm = TRUE)
+
+plot(
+  sub_h$EDAT, sub_h$p_sobre,
+  type = "l",
+  lwd = 2,
+  ylim = ylim_sobre,
+  xlab = "Edad",
+  ylab = "Probabilidad predicha",
+  main = "Sobrequalificació"
+)
+lines(sub_d$EDAT, sub_d$p_sobre, lwd = 2, lty = 2)
+legend("topright", legend = c("Homes", "Dones"), lwd = 2, lty = c(1, 2), bty = "n")
+
+mtext("Probabilidades predichas según edad y sexo (modelos ampliados con pesos reescalados)",
+      outer = TRUE, cex = 1.2)
+
+dev.off()
+```
+
+```{r}
+library(data.table)
+
+noms_ccaa <- c(
+  "01" = "Andalusia",
+  "02" = "Aragó",
+  "03" = "Astúries",
+  "04" = "Illes Balears",
+  "05" = "Canàries",
+  "06" = "Cantàbria",
+  "07" = "Castella i Lleó",
+  "08" = "Castella-La Manxa",
+  "09" = "Catalunya",
+  "10" = "Comunitat Valenciana",
+  "11" = "Extremadura",
+  "12" = "Galícia",
+  "13" = "Madrid",
+  "14" = "Múrcia",
+  "15" = "Navarra",
+  "16" = "País Basc",
+  "17" = "La Rioja",
+  "51" = "Ceuta",
+  "52" = "Melilla"
+)
+
+# Función para calcular la moda
+moda_valor <- function(x) {
+  ux <- na.omit(x)
+  names(sort(table(ux), decreasing = TRUE))[1]
+}
+
+# Función para preparar predicciones por CCAA
+fer_pred_ccaa <- function(model, titol_model) {
+
+  edat_mean <- mean(base_full$EDAT, na.rm = TRUE)
+  any_mean  <- mean(base_full$ANY, na.rm = TRUE)
+
+  act1_ref  <- moda_valor(base_full$ACT1_f)
+  ducon_ref <- moda_valor(base_full$DUCON1_f)
+  parco_ref <- moda_valor(base_full$PARCO1_f)
+
+  pred_ccaa <- data.table(
+    CCAA_f = factor(levels(base_full$CCAA_f), levels = levels(base_full$CCAA_f)),
+    dona = 0,
+    EDAT = edat_mean,
+    ANY = any_mean,
+    ACT1_f = factor(act1_ref, levels = levels(base_full$ACT1_f)),
+    DUCON1_f = factor(ducon_ref, levels = levels(base_full$DUCON1_f)),
+    PARCO1_f = factor(parco_ref, levels = levels(base_full$PARCO1_f))
+  )
+
+  pred_ccaa[, EDAT_c := EDAT - edat_mean]
+  pred_ccaa[, EDAT_c2 := EDAT_c^2]
+  pred_ccaa[, ANY_c := ANY - any_mean]
+
+  pred_ccaa[, p := predict(model, newdata = pred_ccaa, type = "response")]
+  pred_ccaa[, codi := as.character(CCAA_f)]
+  pred_ccaa[, CCAA := noms_ccaa[codi]]
+
+  pred_ccaa <- pred_ccaa[order(p)]
+  pred_ccaa[, ypos := 1:.N]
+  pred_ccaa[, color := "gray40"]
+  pred_ccaa[1:3, color := "firebrick3"]
+  pred_ccaa[(.N-2):.N, color := "darkgreen"]
+
+  list(data = pred_ccaa, titol = titol_model)
+}
+
+g_infra <- fer_pred_ccaa(m_infra_full_w, "Infraqualificació")
+g_sobre <- fer_pred_ccaa(m_sobre_full_w, "Sobrequalificació")
+
+jpeg("03_grafic_totes_ccaa_models_pesos.jpg", width = 2600, height = 1600, res = 200)
+
+par(mfrow = c(1, 2), mar = c(5, 14, 4, 2), oma = c(0, 0, 2, 0))
+
+for (obj in list(g_infra, g_sobre)) {
+
+  dt <- obj$data
+
+  plot(
+    dt$p, dt$ypos,
+    pch = 19,
+    col = dt$color,
+    xlim = c(0, max(dt$p) * 1.15),
+    yaxt = "n",
+    ylab = "",
+    xlab = "Probabilidad predicha",
+    main = obj$titol
+  )
+
+  segments(
+    x0 = 0, y0 = dt$ypos,
+    x1 = dt$p, y1 = dt$ypos,
+    col = "gray75"
+  )
+
+  points(dt$p, dt$ypos, pch = 19, col = dt$color, cex = 1.1)
+
+  axis(2, at = dt$ypos, labels = dt$CCAA, las = 2, cex.axis = 0.85)
+
+  text(
+    x = dt$p,
+    y = dt$ypos,
+    labels = round(dt$p, 3),
+    pos = 4,
+    cex = 0.72
+  )
+
+  legend(
+    "bottomright",
+    legend = c("3 más bajas", "Otras CCAA", "3 más altas"),
+    col = c("firebrick3", "gray40", "darkgreen"),
+    pch = 19,
+    bty = "n",
+    cex = 0.85
+  )
+}
+
+mtext("Probabilidades predichas por CCAA (modelos ampliados con pesos reescalados)",
+      outer = TRUE, cex = 1.2)
+
+dev.off()
+```
+
+
+
+#part nova 
+#model sense pesos 
+```{r}
+# ==================================================
+# 0) PREPARACIÓ
+# ==================================================
+setwd("~/Desktop/DADES")
+load("EPA_2005_2025v2.RData")
+rm(list = setdiff(ls(), "EPA_2005_2025v2"))
+
+library(data.table)
+setDT(EPA_2005_2025v2)
+
+# ==================================================
+# 1) ANY
+# ==================================================
+if (!"ANY" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, ciclo_num := suppressWarnings(as.integer(as.character(CICLO)))]
+  
+  EPA_2005_2025v2[, ANY := fifelse(
+    !is.na(ciclo_num),
+    2005L + (ciclo_num - 130L) %/% 4L,
+    NA_integer_
+  )]
+  
+  EPA_2005_2025v2[, ciclo_num := NULL]
+}
+
+# ==================================================
+# 2) EDAT EXACTA HARMONITZADA
+#    prioritat: EDAT_NUM_1 -> EDAT_NUM_2 -> EDAD1 -> EDAT1
+# ==================================================
+EPA_2005_2025v2[, EDAT := NA_real_]
+
+if ("EDAT_NUM_1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[, EDAT := suppressWarnings(as.numeric(as.character(EDAT_NUM_1)))]
+}
+
+if ("EDAT_NUM_2" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[is.na(EDAT), EDAT := suppressWarnings(as.numeric(as.character(EDAT_NUM_2)))]
+}
+
+if ("EDAD1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[is.na(EDAT), EDAT := suppressWarnings(as.numeric(as.character(EDAD1)))]
+}
+
+if ("EDAT1" %in% names(EPA_2005_2025v2)) {
+  EPA_2005_2025v2[is.na(EDAT), EDAT := suppressWarnings(as.numeric(as.character(EDAT1)))]
+}
+
+# ==================================================
+# 3) ORDRE EDUCATIU
+# ==================================================
+ordre_nforma <- c("AN", "P1", "P2", "S1", "SG", "SP", "SU")
+
+# ==================================================
+# 4) BASE INICIAL
+#    només ocupats, 2005-2025, sense militars
+# ==================================================
+base_model <- EPA_2005_2025v2[
+  ANY >= 2005 & ANY <= 2025 &
+    !is.na(AOI) &
+    trimws(as.character(AOI)) != "" &
+    sprintf("%02d", as.integer(AOI)) %in% c("03", "04") &   # ocupats
+    !is.na(NFORMA) & trimws(as.character(NFORMA)) != "" &
+    !is.na(OCUP1) & trimws(as.character(OCUP1)) != "" &
+    trimws(as.character(OCUP1)) != "0" &                    # excloure militars
+    !is.na(ANY) &
+    !is.na(SEXO1) & trimws(as.character(SEXO1)) %in% c("1", "6") &
+    !is.na(CCAA) & trimws(as.character(CCAA)) != "" &
+    !is.na(EDAT) &
+    !is.na(FACTOREL),
+  .(
+    ANY,
+    NFORMA = trimws(as.character(NFORMA)),
+    OCUP1 = trimws(as.character(OCUP1)),
+    SEXO1 = trimws(as.character(SEXO1)),
+    CCAA = sprintf("%02d", as.integer(CCAA)),
+    EDAT,
+    FACTOREL
+  )
+]
+
+# ==================================================
+# 5) MODA EDUCATIVA GLOBAL PER OCUPACIÓ
+# ==================================================
+moda <- base_model[, .N, by = .(OCUP1, NFORMA)]
+moda[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+moda_final <- moda[
+  order(OCUP1, -N, NFORMA)
+][
+  , .SD[1], by = OCUP1
+]
+
+setnames(moda_final, "NFORMA", "NFORMA_MODA")
+
+# ==================================================
+# 6) ASSIGNAR MODA A CADA OBSERVACIÓ
+# ==================================================
+base_model[, NFORMA := factor(NFORMA, levels = ordre_nforma, ordered = TRUE)]
+
+base_model <- merge(
+  base_model,
+  moda_final[, .(OCUP1, NFORMA_MODA)],
+  by = "OCUP1",
+  all.x = TRUE
+)
+
+# ==================================================
+# 7) VARIABLE DE DESAJUST
+# ==================================================
+base_model[, DESAJUST_MODA := fcase(
+  NFORMA < NFORMA_MODA, "Infraqualificacio",
+  NFORMA == NFORMA_MODA, "Ajust",
+  NFORMA > NFORMA_MODA, "Sobrequalificacio"
+)]
+
+# variables dependents binàries
+base_model[, sobre := ifelse(DESAJUST_MODA == "Sobrequalificacio", 1, 0)]
+base_model[, infra := ifelse(DESAJUST_MODA == "Infraqualificacio", 1, 0)]
+
+# ==================================================
+# 8) VARIABLES EXPLICATIVES
+# ==================================================
+base_model[, dona := ifelse(SEXO1 == "6", 1, 0)]
+base_model[, CCAA_f := factor(CCAA)]
+
+# mostra final amb observacions completes
+base_model <- base_model[
+  !is.na(sobre) & !is.na(infra) &
+    !is.na(dona) & !is.na(EDAT) &
+    !is.na(CCAA_f) & !is.na(ANY) &
+    !is.na(FACTOREL)
+]
+
+# centrar edat i any
+base_model[, EDAT_c := EDAT - mean(EDAT, na.rm = TRUE)]
+base_model[, EDAT_c2 := EDAT_c^2]
+base_model[, ANY_c := ANY - mean(ANY, na.rm = TRUE)]
+
+# pesos reescalats
+base_model[, pes_reesc := FACTOREL / mean(FACTOREL, na.rm = TRUE)]
+
+# ==================================================
+# 9) MODELS PROBIT SENSE PESOS
+# ==================================================
+m_sobre_probit <- glm(
+  sobre ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+  family = binomial(link = "probit"),
+  data = base_model
+)
+
+m_infra_probit <- glm(
+  infra ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+  family = binomial(link = "probit"),
+  data = base_model
+)
+
+# ==================================================
+# 10) MODELS PROBIT AMB PESOS REESCALATS
+# ==================================================
+m_sobre_probit_w <- suppressWarnings(
+  glm(
+    sobre ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+    family = binomial(link = "probit"),
+    data = base_model,
+    weights = pes_reesc
+  )
+)
+
+m_infra_probit_w <- suppressWarnings(
+  glm(
+    infra ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+    family = binomial(link = "probit"),
+    data = base_model,
+    weights = pes_reesc
+  )
+)
+
+# ==================================================
+# 11) MODELS LOGIT
+# ==================================================
+m_sobre_logit <- glm(
+  sobre ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+  family = binomial(link = "logit"),
+  data = base_model
+)
+
+m_infra_logit <- glm(
+  infra ~ dona + EDAT_c + EDAT_c2 + CCAA_f + ANY_c,
+  family = binomial(link = "logit"),
+  data = base_model
+)
+
+# ==================================================
+# 12) RESULTATS BÀSICS
+# ==================================================
+summary(m_sobre_probit)
+summary(m_infra_probit)
+
+summary(m_sobre_probit_w)
+summary(m_infra_probit_w)
+
+summary(m_sobre_logit)
+summary(m_infra_logit)
+
+# coeficients
+coef(m_sobre_probit)
+coef(m_infra_probit)
+
+coef(m_sobre_probit_w)
+coef(m_infra_probit_w)
+
+coef(m_sobre_logit)
+coef(m_infra_logit)
+
+# mida de mostra
+nrow(base_model)
+
+```
+
+```{r}
+# ==================================================
+# RESULTATS DELS MODELS
+# ==================================================
+
+library(data.table)
+
+# --------------------------------------------------
+# 1) SUMMARIES DELS MODELS
+# --------------------------------------------------
+summary(m_infra_probit)
+summary(m_infra_probit_w)
+summary(m_infra_logit)
+
+summary(m_sobre_probit)
+summary(m_sobre_probit_w)
+summary(m_sobre_logit)
+
+# --------------------------------------------------
+# 2) COEFICIENTS DIRECTES (OPCIONAL)
+# --------------------------------------------------
+coef(m_infra_probit)
+coef(m_infra_probit_w)
+coef(m_infra_logit)
+
+coef(m_sobre_probit)
+coef(m_sobre_probit_w)
+coef(m_sobre_logit)
+
+# --------------------------------------------------
+# 3) MIDA DE MOSTRA
+# --------------------------------------------------
+nobs(m_infra_probit)
+nobs(m_infra_probit_w)
+nobs(m_infra_logit)
+
+nobs(m_sobre_probit)
+nobs(m_sobre_probit_w)
+nobs(m_sobre_logit)
+
+# --------------------------------------------------
+# 4) VARIABLES A MOSTRAR A LA TAULA DEL TFG
+# --------------------------------------------------
+keep_terms <- c("dona", "EDAT_c", "EDAT_c2", "ANY_c")
+
+labels <- c(
+  "dona" = "Dona",
+  "EDAT_c" = "Edat (centrada)",
+  "EDAT_c2" = "Edat²",
+  "ANY_c" = "Any (centrat)"
+)
+
+# --------------------------------------------------
+# 5) FUNCIÓ PER EXTREURE RESULTATS DEL MODEL
+# --------------------------------------------------
+extreure_taula <- function(model, nom_model, keep_terms, labels) {
+  
+  mat <- coef(summary(model))
+  
+  coefs <- data.table(
+    Variable = rownames(mat),
+    as.data.table(mat)
+  )
+  
+  # detectar nom de la columna del p-valor
+  p_col <- grep("^Pr\\(", names(coefs), value = TRUE)
+  if (length(p_col) == 0) {
+    stop("No s'ha trobat la columna del p-valor al summary(model).")
+  }
+  p_col <- p_col[1]
+  
+  # detectar nom de la columna de l'estadístic
+  stat_col <- setdiff(names(coefs), c("Variable", "Estimate", "Std. Error", p_col))
+  stat_col <- stat_col[1]
+  
+  setnames(
+    coefs,
+    old = c("Estimate", "Std. Error", stat_col, p_col),
+    new = c("Coef", "SE", "stat", "p")
+  )
+  
+  coefs <- coefs[Variable %in% keep_terms]
+  
+  coefs[, stars := fcase(
+    p < 0.001, "***",
+    p < 0.01,  "**",
+    p < 0.05,  "*",
+    p < 0.1,   ".",
+    default = ""
+  )]
+  
+  coefs[, Variable := labels[Variable]]
+  coefs[, valor := sprintf("%.3f%s\n(%.3f)", Coef, stars, SE)]
+  coefs[, Model := nom_model]
+  
+  coefs[, .(Variable, Model, valor)]
+}
+
+# --------------------------------------------------
+# 6) EXTREURE RESULTATS DELS 6 MODELS
+# --------------------------------------------------
+t1 <- extreure_taula(m_infra_probit,   "Infra probit",        keep_terms, labels)
+t2 <- extreure_taula(m_infra_probit_w, "Infra probit pesos",  keep_terms, labels)
+t3 <- extreure_taula(m_infra_logit,    "Infra logit",         keep_terms, labels)
+
+t4 <- extreure_taula(m_sobre_probit,   "Sobre probit",        keep_terms, labels)
+t5 <- extreure_taula(m_sobre_probit_w, "Sobre probit pesos",  keep_terms, labels)
+t6 <- extreure_taula(m_sobre_logit,    "Sobre logit",         keep_terms, labels)
+
+# --------------------------------------------------
+# 7) UNIFICAR TAULES
+# --------------------------------------------------
+taula_tfg <- rbindlist(list(t1, t2, t3, t4, t5, t6), use.names = TRUE, fill = TRUE)
+
+taula_tfg <- dcast(
+  taula_tfg,
+  Variable ~ Model,
+  value.var = "valor",
+  fill = ""
+)
+
+# --------------------------------------------------
+# 8) ORDENAR FILES
+# --------------------------------------------------
+ordre_files <- c(
+  "Dona",
+  "Edat (centrada)",
+  "Edat²",
+  "Any (centrat)"
+)
+
+taula_base <- data.table(Variable = ordre_files)
+
+taula_tfg <- merge(
+  taula_base,
+  taula_tfg,
+  by = "Variable",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+taula_tfg[is.na(taula_tfg)] <- ""
+
+# --------------------------------------------------
+# 9) FILES EXTRA DE RESUM
+# --------------------------------------------------
+files_extra <- data.table(
+  Variable = c("Observacions", "AIC", "Inclou CCAA", "Pesos", "Funció d'enllaç"),
+  `Infra probit`       = c(nobs(m_infra_probit),   round(AIC(m_infra_probit), 1),   "Sí", "No", "Probit"),
+  `Infra probit pesos` = c(nobs(m_infra_probit_w), round(AIC(m_infra_probit_w), 1), "Sí", "Sí", "Probit"),
+  `Infra logit`        = c(nobs(m_infra_logit),    round(AIC(m_infra_logit), 1),    "Sí", "No", "Logit"),
+  `Sobre probit`       = c(nobs(m_sobre_probit),   round(AIC(m_sobre_probit), 1),   "Sí", "No", "Probit"),
+  `Sobre probit pesos` = c(nobs(m_sobre_probit_w), round(AIC(m_sobre_probit_w), 1), "Sí", "Sí", "Probit"),
+  `Sobre logit`        = c(nobs(m_sobre_logit),    round(AIC(m_sobre_logit), 1),    "Sí", "No", "Logit")
+)
+
+# --------------------------------------------------
+# 10) ORDENAR COLUMNES
+# --------------------------------------------------
+ordre_cols <- c(
+  "Variable",
+  "Infra probit",
+  "Infra probit pesos",
+  "Infra logit",
+  "Sobre probit",
+  "Sobre probit pesos",
+  "Sobre logit"
+)
+
+taula_tfg <- taula_tfg[, ..ordre_cols]
+
+taula_tfg_final <- rbind(taula_tfg, files_extra, fill = TRUE)
+taula_tfg_final <- taula_tfg_final[, ..ordre_cols]
+
+# --------------------------------------------------
+# 11) VEURE RESULTAT FINAL
+# --------------------------------------------------
+print(taula_tfg_final)
+View(taula_tfg_final)
+```
+
+#efectes mg
+```{r}
+library(data.table)
+library(ggplot2)
+
+setDT(base_model)
+
+# --------------------------------------------
+# 1) MITJANES USADES EN EL CENTRATGE
+# --------------------------------------------
+mitjana_edat <- mean(base_model$EDAT, na.rm = TRUE)
+mitjana_any  <- mean(base_model$ANY,  na.rm = TRUE)
+
+# --------------------------------------------
+# 2) FUNCIONS PER CALCULAR AME
+# --------------------------------------------
+
+# efecte marginal mitjà per variable binària
+ame_binaria <- function(model, data, var, weights_var = NULL) {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d0[, (var) := 0]
+  d1[, (var) := 1]
+  
+  p0 <- predict(model, newdata = d0, type = "response")
+  p1 <- predict(model, newdata = d1, type = "response")
+  
+  dif <- p1 - p0
+  
+  if (is.null(weights_var)) {
+    return(mean(dif, na.rm = TRUE))
+  } else {
+    return(weighted.mean(dif, w = data[[weights_var]], na.rm = TRUE))
+  }
+}
+
+# efecte marginal mitjà de l'edat
+ame_edat <- function(model, data, pas = 1, weights_var = NULL, mean_edat) {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d1[, EDAT := EDAT + pas]
+  d1[, EDAT_c := EDAT - mean_edat]
+  d1[, EDAT_c2 := EDAT_c^2]
+  
+  p0 <- predict(model, newdata = d0, type = "response")
+  p1 <- predict(model, newdata = d1, type = "response")
+  
+  dif <- (p1 - p0) / pas
+  
+  if (is.null(weights_var)) {
+    return(mean(dif, na.rm = TRUE))
+  } else {
+    return(weighted.mean(dif, w = data[[weights_var]], na.rm = TRUE))
+  }
+}
+
+# efecte marginal mitjà de l'any
+ame_any <- function(model, data, pas = 1, weights_var = NULL, mean_any) {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d1[, ANY := ANY + pas]
+  d1[, ANY_c := ANY - mean_any]
+  
+  p0 <- predict(model, newdata = d0, type = "response")
+  p1 <- predict(model, newdata = d1, type = "response")
+  
+  dif <- (p1 - p0) / pas
+  
+  if (is.null(weights_var)) {
+    return(mean(dif, na.rm = TRUE))
+  } else {
+    return(weighted.mean(dif, w = data[[weights_var]], na.rm = TRUE))
+  }
+}
+
+# funció resum
+calcula_ame_model <- function(model, data, resultat, model_nom, weights_var = NULL,
+                              mean_edat, mean_any) {
+  
+  data.table(
+    resultat = resultat,
+    model = model_nom,
+    Variable = c("Dona", "Edat", "Any"),
+    AME = c(
+      ame_binaria(model, data, "dona", weights_var = weights_var),
+      ame_edat(model, data, weights_var = weights_var, mean_edat = mean_edat),
+      ame_any(model, data, weights_var = weights_var, mean_any = mean_any)
+    )
+  )
+}
+
+# --------------------------------------------
+# 3) AME DEL MODEL PROBIT SENSE PESOS
+# --------------------------------------------
+ame_probit_principal <- rbindlist(list(
+  calcula_ame_model(
+    m_sobre_probit, base_model,
+    resultat = "Sobrequalificació",
+    model_nom = "Probit",
+    weights_var = NULL,
+    mean_edat = mitjana_edat,
+    mean_any = mitjana_any
+  ),
+  calcula_ame_model(
+    m_infra_probit, base_model,
+    resultat = "Infraqualificació",
+    model_nom = "Probit",
+    weights_var = NULL,
+    mean_edat = mitjana_edat,
+    mean_any = mitjana_any
+  )
+))
+
+print(ame_probit_principal)
+View(ame_probit_principal)
+
+# --------------------------------------------
+# 4) GRÀFIC AME MODEL PRINCIPAL
+# --------------------------------------------
+g_ame_probit <- ggplot(
+  ame_probit_principal,
+  aes(x = AME, y = Variable)
+) +
+  geom_vline(xintercept = 0, linetype = 2, color = "gray60") +
+  geom_segment(aes(x = 0, xend = AME, y = Variable, yend = Variable), linewidth = 0.5) +
+  geom_point(size = 3) +
+  facet_wrap(~ resultat, scales = "free_x") +
+  labs(
+    title = "Efectes marginals mitjans del model probit sense pesos",
+    x = "Canvi mitjà en la probabilitat",
+    y = NULL
+  ) +
+  theme_minimal()
+
+print(g_ame_probit)
+
+ggsave(
+  "ame_probit_sense_pesos.jpg",
+  g_ame_probit,
+  width = 10,
+  height = 5,
+  dpi = 300
+)
+```
+
+```{r}
+library(data.table)
+library(ggplot2)
+
+setDT(base_model)
+
+# --------------------------------------------
+# 1) MITJANES DE REFERÈNCIA
+# --------------------------------------------
+mitjana_edat <- mean(base_model$EDAT, na.rm = TRUE)
+mitjana_any  <- mean(base_model$ANY,  na.rm = TRUE)
+
+# --------------------------------------------
+# 2) FUNCIÓ DE PREDICCIÓ MITJANA
+#    Manté la resta de variables observades
+# --------------------------------------------
+pred_mitjana_edat_sexe <- function(model, data, resultat_nom) {
+  
+  res <- rbindlist(lapply(16:70, function(e) {
+    rbindlist(lapply(c(0, 1), function(d) {
+      tmp <- copy(data)
+      
+      tmp[, EDAT := e]
+      tmp[, EDAT_c := EDAT - mitjana_edat]
+      tmp[, EDAT_c2 := EDAT_c^2]
+      tmp[, dona := d]
+      
+      p <- predict(model, newdata = tmp, type = "response")
+      
+      data.table(
+        EDAT = e,
+        dona = d,
+        probabilitat = mean(p, na.rm = TRUE),
+        resultat = resultat_nom
+      )
+    }))
+  }))
+  
+  res[, sexe := fifelse(dona == 1, "Dones", "Homes")]
+  return(res)
+}
+
+# --------------------------------------------
+# 3) PREDICCIONS
+# --------------------------------------------
+pred_sobre <- pred_mitjana_edat_sexe(m_sobre_probit, base_model, "Sobrequalificació")
+pred_infra <- pred_mitjana_edat_sexe(m_infra_probit, base_model, "Infraqualificació")
+
+pred_plot <- rbindlist(list(pred_sobre, pred_infra))
+
+# --------------------------------------------
+# 4) GRÀFIC
+# --------------------------------------------
+g_pred_edat <- ggplot(
+  pred_plot,
+  aes(x = EDAT, y = probabilitat, linetype = sexe)
+) +
+  geom_line(linewidth = 0.9) +
+  facet_wrap(~ resultat, scales = "free_y") +
+  scale_y_continuous(labels = function(x) paste0(round(100 * x, 0), "%")) +
+  labs(
+    title = "Probabilitats predides segons edat i sexe",
+    subtitle = "Model probit sense pesos",
+    x = "Edat",
+    y = "Probabilitat predida",
+    linetype = NULL
+  ) +
+  theme_minimal()
+
+print(g_pred_edat)
+
+ggsave(
+  "prediccions_edat_sexe_probit.jpg",
+  g_pred_edat,
+  width = 10,
+  height = 5,
+  dpi = 300
+)
+```
+
+```{r}
+library(data.table)
+library(ggplot2)
+
+setDT(base_model)
+
+# --------------------------------------------
+# 1) MITJANES USADES EN EL CENTRATGE
+# --------------------------------------------
+mitjana_edat <- mean(base_model$EDAT, na.rm = TRUE)
+mitjana_any  <- mean(base_model$ANY,  na.rm = TRUE)
+
+# --------------------------------------------
+# 2) SI NO EXISTEIX PES REESCALAT, EL CREEM
+# --------------------------------------------
+if (!"pes_reesc" %in% names(base_model)) {
+  base_model[, pes_reesc := FACTOREL / mean(FACTOREL, na.rm = TRUE)]
+}
+
+# --------------------------------------------
+# 3) FUNCIONS AME
+# --------------------------------------------
+ame_binaria <- function(model, data, var, weights_var = NULL) {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d0[, (var) := 0]
+  d1[, (var) := 1]
+  
+  p0 <- predict(model, newdata = d0, type = "response")
+  p1 <- predict(model, newdata = d1, type = "response")
+  
+  dif <- p1 - p0
+  
+  if (is.null(weights_var)) {
+    return(mean(dif, na.rm = TRUE))
+  } else {
+    return(weighted.mean(dif, w = data[[weights_var]], na.rm = TRUE))
+  }
+}
+
+ame_edat <- function(model, data, pas = 1, weights_var = NULL, mean_edat) {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d1[, EDAT := EDAT + pas]
+  d1[, EDAT_c := EDAT - mean_edat]
+  d1[, EDAT_c2 := EDAT_c^2]
+  
+  p0 <- predict(model, newdata = d0, type = "response")
+  p1 <- predict(model, newdata = d1, type = "response")
+  
+  dif <- (p1 - p0) / pas
+  
+  if (is.null(weights_var)) {
+    return(mean(dif, na.rm = TRUE))
+  } else {
+    return(weighted.mean(dif, w = data[[weights_var]], na.rm = TRUE))
+  }
+}
+
+ame_any <- function(model, data, pas = 1, weights_var = NULL, mean_any) {
+  d0 <- copy(data)
+  d1 <- copy(data)
+  
+  d1[, ANY := ANY + pas]
+  d1[, ANY_c := ANY - mean_any]
+  
+  p0 <- predict(model, newdata = d0, type = "response")
+  p1 <- predict(model, newdata = d1, type = "response")
+  
+  dif <- (p1 - p0) / pas
+  
+  if (is.null(weights_var)) {
+    return(mean(dif, na.rm = TRUE))
+  } else {
+    return(weighted.mean(dif, w = data[[weights_var]], na.rm = TRUE))
+  }
+}
+
+calcula_ame_model <- function(model, data, resultat, model_nom, weights_var = NULL,
+                              mean_edat, mean_any) {
+  
+  data.table(
+    resultat = resultat,
+    model = model_nom,
+    Variable = c("Dona", "Edat", "Any"),
+    AME = c(
+      ame_binaria(model, data, "dona", weights_var = weights_var),
+      ame_edat(model, data, weights_var = weights_var, mean_edat = mean_edat),
+      ame_any(model, data, weights_var = weights_var, mean_any = mean_any)
+    )
+  )
+}
+
+# --------------------------------------------
+# 4) AME DELS TRES MODELS
+# --------------------------------------------
+robustesa_ame <- rbindlist(list(
+  calcula_ame_model(m_sobre_probit,   base_model, "Sobrequalificació", "Probit",            NULL,        mitjana_edat, mitjana_any),
+  calcula_ame_model(m_sobre_probit_w, base_model, "Sobrequalificació", "Probit amb pesos",  "pes_reesc", mitjana_edat, mitjana_any),
+  calcula_ame_model(m_sobre_logit,    base_model, "Sobrequalificació", "Logit",             NULL,        mitjana_edat, mitjana_any),
+  
+  calcula_ame_model(m_infra_probit,   base_model, "Infraqualificació", "Probit",            NULL,        mitjana_edat, mitjana_any),
+  calcula_ame_model(m_infra_probit_w, base_model, "Infraqualificació", "Probit amb pesos",  "pes_reesc", mitjana_edat, mitjana_any),
+  calcula_ame_model(m_infra_logit,    base_model, "Infraqualificació", "Logit",             NULL,        mitjana_edat, mitjana_any)
+))
+
+print(robustesa_ame)
+View(robustesa_ame)
+
+# --------------------------------------------
+# 5) GRÀFIC DE ROBUSTESA
+# --------------------------------------------
+g_robustesa <- ggplot(
+  robustesa_ame,
+  aes(x = AME, y = Variable, shape = model)
+) +
+  geom_vline(xintercept = 0, linetype = 2, color = "gray60") +
+  geom_point(
+    position = position_dodge(width = 0.5),
+    size = 3
+  ) +
+  facet_wrap(~ resultat, scales = "free_x") +
+  labs(
+    title = "Comparació dels efectes marginals segons especificació",
+    x = "Efecte marginal mitjà",
+    y = NULL,
+    shape = NULL
+  ) +
+  theme_minimal()
+
+print(g_robustesa)
+
+ggsave(
+  "robustesa_ame_models.jpg",
+  g_robustesa,
+  width = 11,
+  height = 5,
+  dpi = 300
+)
+```
+
+```{r}
+library(data.table)
+library(ggplot2)
+
+# --------------------------------------------------
+# 1) FUNCIÓ PER EXTREURE COEFICIENTS DE LES CCAA
+# --------------------------------------------------
+extreu_coef_ccaa <- function(model, nom_model) {
+  
+  mat <- coef(summary(model))
+  
+  dt <- data.table(
+    terme = rownames(mat),
+    coef = mat[, 1],
+    se = mat[, 2]
+  )
+  
+  # només coeficients de CCAA
+  dt <- dt[grepl("^CCAA_f", terme)]
+  
+  # intervals de confiança aproximats al 95%
+  dt[, ic_low := coef - 1.96 * se]
+  dt[, ic_high := coef + 1.96 * se]
+  
+  # extreure codi de CCAA
+  dt[, CCAA := gsub("^CCAA_f", "", terme)]
+  
+  # model
+  dt[, model := nom_model]
+  
+  dt[]
+}
+
+# --------------------------------------------------
+# 2) EXTREURE RESULTATS DELS DOS MODELS
+# --------------------------------------------------
+coef_infra <- extreu_coef_ccaa(m_infra_probit, "Infraqualificació")
+coef_sobre <- extreu_coef_ccaa(m_sobre_probit, "Sobrequalificació")
+
+coef_ccaa <- rbindlist(list(coef_infra, coef_sobre), fill = TRUE)
+
+# --------------------------------------------------
+# 3) ETIQUETES DE CCAA
+#    adapta-les si vols el nom complet
+# --------------------------------------------------
+labels_ccaa <- c(
+  "01" = "Andalusia",
+  "02" = "Aragó",
+  "03" = "Astúries",
+  "04" = "Illes Balears",
+  "05" = "Canàries",
+  "06" = "Cantàbria",
+  "07" = "Castella i Lleó",
+  "08" = "Castella-La Manxa",
+  "09" = "Catalunya",
+  "10" = "Comunitat Valenciana",
+  "11" = "Extremadura",
+  "12" = "Galícia",
+  "13" = "Madrid",
+  "14" = "Múrcia",
+  "15" = "Navarra",
+  "16" = "País Basc",
+  "17" = "La Rioja",
+  "18" = "Ceuta",
+  "19" = "Melilla"
+)
+
+coef_ccaa[, CCAA_label := labels_ccaa[CCAA]]
+
+# si alguna no queda etiquetada, mostrar el codi
+coef_ccaa[is.na(CCAA_label), CCAA_label := CCAA]
+
+# --------------------------------------------------
+# 4) ORDENAR DINS DE CADA MODEL
+# --------------------------------------------------
+coef_ccaa[, CCAA_label := factor(CCAA_label, levels = unique(CCAA_label[order(coef)])), by = model]
+
+# --------------------------------------------------
+# 5) COEFPLOT
+# --------------------------------------------------
+g_ccaa <- ggplot(
+  coef_ccaa,
+  aes(x = coef, y = CCAA_label)
+) +
+  geom_vline(xintercept = 0, linetype = 2, color = "gray60") +
+  geom_errorbarh(
+    aes(xmin = ic_low, xmax = ic_high),
+    height = 0.2
+  ) +
+  geom_point(size = 2) +
+  facet_wrap(~ model, scales = "free_y") +
+  labs(
+    title = "Coeficients estimats de les comunitats autònomes",
+    subtitle = "Models probit sense pesos. Categoria de referència omesa",
+    x = "Coeficient estimat",
+    y = NULL
+  ) +
+  theme_minimal()
+
+print(g_ccaa)
+
+ggsave(
+  "coefplot_ccaa_probit_sense_pesos.jpg",
+  g_ccaa,
+  width = 11,
+  height = 8,
+  dpi = 300
+)
+```
+
+
